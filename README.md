@@ -37,6 +37,16 @@ TODO
 This feels like it is REALLY easy to mirror by using kubenix helm under the hood and describing in one nix file what you want.
 Perfectly locked, perfectly reproducible, and no need to use helmfile at all.
 
-## CoreDNS module (./coredns/)
+## CoreDNS module (./coredns/) ~ helm replacement?
 
 In Progress
+
+Thoughts:
+- we can likely drop a lot of values by always offering manual merging with the final attrset per yaml (kustomize type behavior)
+- values.yaml is a mess. some values are only declared in comments, their usage might diverge from their consumtion etc
+- roles and bindings etc need to have primitives to reduce duplication and enable label sharing
+
+# Weird thougths
+
+- nixos vms as runtime in k8s
+- direct image builds including the config in the image etc (not far fetched but needs registry that can handle this well - e.g. the nix store type registry)
