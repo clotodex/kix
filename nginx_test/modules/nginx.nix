@@ -195,7 +195,7 @@ let
   deploymentManifest = lib.recursiveUpdate baseDeployment finalCfg.deploymentExtras;
   serviceManifest = lib.recursiveUpdate baseService finalCfg.serviceExtras;
 
-  # Support for complete manifest overrides
+  # Support for complete manifest overrides with dependency tracking
   finalManifests = 
     if finalCfg.manifests != {} then
       # Use user-provided manifests, but convert to JSON files
@@ -203,11 +203,34 @@ let
         pkgs.writeText name (builtins.toJSON manifest)
       ) finalCfg.manifests
     else
-      # Use generated manifests with extensions
-      {
-        "configmap-nginx.json" = pkgs.writeText "configmap-nginx.json" (builtins.toJSON configMapManifest);
-        "deployment-nginx.json" = pkgs.writeText "deployment-nginx.json" (builtins.toJSON deploymentManifest);
-        "service-nginx.json" = pkgs.writeText "service-nginx.json" (builtins.toJSON serviceManifest);
+      # Use generated manifests with dependency tracking via store path references
+      let
+        # ConfigMap is the base dependency
+        configMapDerivation = pkgs.writeText "configmap-nginx.json" (builtins.toJSON configMapManifest);
+        
+        # Deployment with ConfigMap dependency reference
+        deploymentWithDeps = deploymentManifest // {
+          metadata = deploymentManifest.metadata // {
+            annotations = (deploymentManifest.metadata.annotations or {}) // {
+              "nix.kix.dev/configmap-dependency" = "${configMapDerivation}";
+            };
+          };
+        };
+        deploymentDerivation = pkgs.writeText "deployment-nginx.json" (builtins.toJSON deploymentWithDeps);
+        
+        # Service with both ConfigMap and Deployment dependency references  
+        serviceWithDeps = serviceManifest // {
+          metadata = serviceManifest.metadata // {
+            annotations = (serviceManifest.metadata.annotations or {}) // {
+              "nix.kix.dev/deployment-dependency" = "${deploymentDerivation}";
+            };
+          };
+        };
+        serviceDerivation = pkgs.writeText "service-nginx.json" (builtins.toJSON serviceWithDeps);
+      in {
+        #"configmap-nginx.json" = configMapDerivation;
+        #"deployment-nginx.json" = deploymentDerivation;
+        "service-nginx.json" = serviceDerivation;
       };
 
 in
