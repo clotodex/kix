@@ -59,6 +59,15 @@ Thoughts:
 - helm with its (almost) sprig compliance is really hard to transpile into rust without essentially reimplementing the language, so automation or easily porting will be off the table
   - however: superimposing a custom module, that could also map the dependencies from a `helm template` run and then rederiving the files for easier packaging might be enough
   - also what if we make kix helm chart compliant so that dependencies of charts could be ported over bit by bit
+- improving the first port
+  - fix up dependencies
+  - move into subfiles
+  - separate out custom overrides (kustomize style) and actual configuration
+  - make configuraion depend on the same variables
+  - improve nix usage (especially inherit)
+  - create functions like mkService to prevent the code duplication and boilerplating
+  - go over values options and rethink how i would change or encapsulate them
+  - add quality of life like hpa vs autoscaler assert
 
 # Weird thougths
 
