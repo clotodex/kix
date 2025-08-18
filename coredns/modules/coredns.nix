@@ -14,49 +14,54 @@ let
       default = {
         enabled = false;
       };
-      apply = userValue: lib.mkMerge [ {
-        enabled = false;
-        coresPerReplica = 256;
-        nodesPerReplica = 16;
-        min = 0;
-        max = 0;
-        includeUnschedulableNodes = false;
-        preventSinglePointFailure = true;
-        podAnnotations = { };
-        customFlags = [ ]; # list of strings like "--nodelabels=..."
-        image = {
-          repository = "registry.k8s.io/cpa/cluster-proportional-autoscaler";
-          tag = "v1.9.0";
-          pullPolicy = "IfNotPresent";
-          pullSecrets = [ ];
-        };
-        priorityClassName = "";
-        affinity = { };
-        nodeSelector = { };
-        tolerations = [ ];
-        resources = {
-          requests = {
-            cpu = "20m";
-            memory = "10Mi";
-          };
-          limits = {
-            cpu = "20m";
-            memory = "10Mi";
-          };
-        };
-        configmap = {
-          annotations = { };
-        };
-        livenessProbe = {
-          enabled = true;
-          initialDelaySeconds = 10;
-          periodSeconds = 5;
-          timeoutSeconds = 5;
-          failureThreshold = 3;
-          successThreshold = 1;
-        };
-        extraContainers = [ ];
-      } userValue ];
+      apply =
+        userValue:
+        lib.mkMerge [
+          {
+            enabled = false;
+            coresPerReplica = 256;
+            nodesPerReplica = 16;
+            min = 0;
+            max = 0;
+            includeUnschedulableNodes = false;
+            preventSinglePointFailure = true;
+            podAnnotations = { };
+            customFlags = [ ]; # list of strings like "--nodelabels=..."
+            image = {
+              repository = "registry.k8s.io/cpa/cluster-proportional-autoscaler";
+              tag = "v1.9.0";
+              pullPolicy = "IfNotPresent";
+              pullSecrets = [ ];
+            };
+            priorityClassName = "";
+            affinity = { };
+            nodeSelector = { };
+            tolerations = [ ];
+            resources = {
+              requests = {
+                cpu = "20m";
+                memory = "10Mi";
+              };
+              limits = {
+                cpu = "20m";
+                memory = "10Mi";
+              };
+            };
+            configmap = {
+              annotations = { };
+            };
+            livenessProbe = {
+              enabled = true;
+              initialDelaySeconds = 10;
+              periodSeconds = 5;
+              timeoutSeconds = 5;
+              failureThreshold = 3;
+              successThreshold = 1;
+            };
+            extraContainers = [ ];
+          }
+          userValue
+        ];
       description = "Cluster-proportional-autoscaler (CPA) configuration for CoreDNS deployment.";
     };
     deployment = lib.mkOption {
@@ -477,7 +482,9 @@ let
     };
   };
 
-  configMapAutoscalerDrv = pkgs.writeText "configmap-autoscaler.json" (builtins.toJSON configMapAutoscaler);
+  configMapAutoscalerDrv = pkgs.writeText "configmap-autoscaler.json" (
+    builtins.toJSON configMapAutoscaler
+  );
 
   deploymentAutoscaler = {
     apiVersion = "apps/v1";
@@ -494,87 +501,115 @@ let
         matchLabels = {
           "app.kubernetes.io/instance" = chart.release.name;
           "app.kubernetes.io/name" = "${chart.name}-autoscaler"; # FIXME: not fully following chart
-        } // lib.optionalAttrs coredns.isClusterService {
+        }
+        // lib.optionalAttrs coredns.isClusterService {
           "k8s-app" = lib.mkDefault (lib.strings.toLower (coredns.k8sAppLabelOverride or chart.name));
         };
       };
       template = {
         metadata = {
-          labels = lib.optionalAttrs coredns.isClusterService {
-            "k8s-app" = lib.mkDefault (lib.strings.toLower (coredns.k8sAppLabelOverride or chart.name));
-          } // {
-            "app.kubernetes.io/name" = "${chart.name}-autoscaler";
-            "app.kubernetes.io/instance" = chart.release.name;
-          } // coredns.customLabels;
+          labels =
+            lib.optionalAttrs coredns.isClusterService {
+              "k8s-app" = lib.mkDefault (lib.strings.toLower (coredns.k8sAppLabelOverride or chart.name));
+            }
+            // {
+              "app.kubernetes.io/name" = "${chart.name}-autoscaler";
+              "app.kubernetes.io/instance" = chart.release.name;
+            }
+            // coredns.customLabels;
           annotations = {
             "checksum/configmap" = "${configMapAutoscalerDrv}";
             "nix.kix.dev/configmap-dependency" = "${configMapAutoscalerDrv}";
-          } // lib.optionalAttrs coredns.rbac.create {
+          }
+          // lib.optionalAttrs coredns.rbac.create {
             "nix.kix.dev/clusterrolebinding-dependency" = "${clusterRoleAutoScalerBindingDrv}";
-          } // lib.optionalAttrs coredns.isClusterService {
+          }
+          // lib.optionalAttrs coredns.isClusterService {
             "scheduler.alpha.kubernetes.io/tolerations" = builtins.toJSON [
               {
                 key = "CriticalAddonsOnly";
                 operator = "Exists";
               }
             ];
-          } //
+          }
+          //
 
-          coredns.autoscaler.podAnnotations; # TODO: is it on purpose that coredns helm chart does not pull in customAnnotations here?
+            coredns.autoscaler.podAnnotations; # TODO: is it on purpose that coredns helm chart does not pull in customAnnotations here?
         };
         spec = {
           serviceAccountName = "${fullname}-autoscaler"; # TODO: think about how to make this reference more effective
-          }
-          // lib.optionalAttrs (coredns.autoscaler.priorityClassName != "") {
-            priorityClassName = coredns.autoscaler.priorityClassName;
-          }
-          // lib.optionalAttrs (coredns.autoscaler.affinity != {}) { affinity = coredns.autoscaler.affinity; }
-          // lib.optionalAttrs (coredns.autoscaler.tolerations != []) { tolerations = coredns.autoscaler.tolerations; }
-          // lib.optionalAttrs (coredns.autoscaler.nodeSelector != {}) { nodeSelector = coredns.autoscaler.nodeSelector; }
-          // lib.optionalAttrs (coredns.autoscaler.image.pullSecrets != []) { imagePullSecrets = coredns.autoscaler.image.pullSecrets; }
-          // {
+        }
+        // lib.optionalAttrs (coredns.autoscaler.priorityClassName != "") {
+          priorityClassName = coredns.autoscaler.priorityClassName;
+        }
+        // lib.optionalAttrs (coredns.autoscaler.affinity != { }) {
+          affinity = coredns.autoscaler.affinity;
+        }
+        // lib.optionalAttrs (coredns.autoscaler.tolerations != [ ]) {
+          tolerations = coredns.autoscaler.tolerations;
+        }
+        // lib.optionalAttrs (coredns.autoscaler.nodeSelector != { }) {
+          nodeSelector = coredns.autoscaler.nodeSelector;
+        }
+        // lib.optionalAttrs (coredns.autoscaler.image.pullSecrets != [ ]) {
+          imagePullSecrets = coredns.autoscaler.image.pullSecrets;
+        }
+        // {
           containers = [
-            ({
-              name = "autoscaler";
-              image = "${coredns.autoscaler.image.repository}:${coredns.autoscaler.image.tag}";
-              imagePullPolicy = coredns.autoscaler.image.pullPolicy;
-              resources = coredns.autoscaler.resources;
-              command = [
-                "/cluster-proportional-autoscaler"
-                "--namespace=${chart.release.namespace}"
-                "--configmap=${fullname}-autoscaler"
-                "--target=Deployment/${coredns.deployment.name or fullname}"
-                "--logtostderr=true"
-                "--v=2"
-              ]
-              ++ coredns.autoscaler.customFlags or []; # FIXME: should move to submodule pattern otherwise breaks if userside not set
-            } // lib.optionalAttrs (coredns.autoscaler.livenessProbe.enabled) {
-              livenessProbe = {
-                httpGet = {
-                  path = "/healthz";
-                  port = 8080;
-                  scheme = "HTTP";
+            (
+              {
+                name = "autoscaler";
+                image = "${coredns.autoscaler.image.repository}:${coredns.autoscaler.image.tag}";
+                imagePullPolicy = coredns.autoscaler.image.pullPolicy;
+                resources = coredns.autoscaler.resources;
+                command = [
+                  "/cluster-proportional-autoscaler"
+                  "--namespace=${chart.release.namespace}"
+                  "--configmap=${fullname}-autoscaler"
+                  "--target=Deployment/${coredns.deployment.name or fullname}"
+                  "--logtostderr=true"
+                  "--v=2"
+                ]
+                ++ coredns.autoscaler.customFlags or [ ]; # FIXME: should move to submodule pattern otherwise breaks if userside not set
+              }
+              // lib.optionalAttrs (coredns.autoscaler.livenessProbe.enabled) {
+                livenessProbe = {
+                  httpGet = {
+                    path = "/healthz";
+                    port = 8080;
+                    scheme = "HTTP";
+                  };
+                  # TODO: I think this should be mergable with coredns.autoscaler.livenessProbe but would need to skip enabled
+                  initialDelaySeconds = coredns.autoscaler.livenessProbe.initialDelaySeconds;
+                  periodSeconds = coredns.autoscaler.livenessProbe.periodSeconds;
+                  timeoutSeconds = coredns.autoscaler.livenessProbe.timeoutSeconds;
+                  successThreshold = coredns.autoscaler.livenessProbe.successThreshold;
+                  failureThreshold = coredns.autoscaler.livenessProbe.failureThreshold;
                 };
-                # TODO: I think this should be mergable with coredns.autoscaler.livenessProbe but would need to skip enabled
-                initialDelaySeconds = coredns.autoscaler.livenessProbe.initialDelaySeconds;
-                periodSeconds = coredns.autoscaler.livenessProbe.periodSeconds;
-                timeoutSeconds = coredns.autoscaler.livenessProbe.timeoutSeconds;
-                successThreshold = coredns.autoscaler.livenessProbe.successThreshold;
-                failureThreshold = coredns.autoscaler.livenessProbe.failureThreshold;
-              };
-            })
+              }
+            )
           ]
           ++ coredns.autoscaler.extraContainers
-          ++ lib.lists.optional (coredns.autoscaler.affinity != {}) { affinity = coredns.autoscaler.affinity; }
-          ++ lib.lists.optional (coredns.autoscaler.tolerations != []) { tolerations = coredns.autoscaler.tolerations; }
-          ++ lib.lists.optional (coredns.autoscaler.nodeSelector != {}) { nodeSelector = coredns.autoscaler.nodeSelector; }
-          ++ lib.lists.optional (coredns.autoscaler.image.pullSecrets != []) { imagePullSecrets = coredns.autoscaler.image.pullSecrets; };
+          ++ lib.lists.optional (coredns.autoscaler.affinity != { }) {
+            affinity = coredns.autoscaler.affinity;
+          }
+          ++ lib.lists.optional (coredns.autoscaler.tolerations != [ ]) {
+            tolerations = coredns.autoscaler.tolerations;
+          }
+          ++ lib.lists.optional (coredns.autoscaler.nodeSelector != { }) {
+            nodeSelector = coredns.autoscaler.nodeSelector;
+          }
+          ++ lib.lists.optional (coredns.autoscaler.image.pullSecrets != [ ]) {
+            imagePullSecrets = coredns.autoscaler.image.pullSecrets;
+          };
         };
       };
     };
   };
 
-  deploymentAutoscalerDrv = pkgs.writeText "deployment-autoscaler.json" (builtins.toJSON deploymentAutoscaler);
+  deploymentAutoscalerDrv = pkgs.writeText "deployment-autoscaler.json" (
+    builtins.toJSON deploymentAutoscaler
+  );
 
   clusterRole = {
     apiVersion = "rbac.authorization.k8s.io/v1";
@@ -649,6 +684,383 @@ let
 
   clusterRoleBindingDrv = pkgs.writeText "clusterrole.json" (builtins.toJSON clusterRoleBinding);
 
+  inherit (lib)
+    concatStringsSep
+    optionalString
+    concatMapStrings
+    splitString
+    ;
+
+  # render extraConfig
+  renderExtraConfig =
+    extraConfig:
+    concatStringsSep "\n" (
+      map (
+        name:
+        let
+          conf = extraConfig.${name};
+        in
+        name + optionalString (conf ? parameters && conf.parameters != null) (" " + conf.parameters)
+      ) (builtins.attrNames extraConfig)
+    );
+
+  # render zones
+  renderZone = zone: (zone.scheme or "") + (zone.zone or ".");
+
+  renderZones = zones: if zones == [ ] then "." else concatStringsSep " " (map renderZone zones);
+
+  # render plugins
+  renderPlugin =
+    plugin:
+    let
+      params = optionalString (plugin ? parameters && plugin.parameters != null) (
+        " " + plugin.parameters
+      );
+      cfg = optionalString (plugin ? configBlock && plugin.configBlock != null) (
+        " {\n"
+        + concatMapStrings (line: "            " + line + "\n") (splitString "\n" plugin.configBlock)
+        + "        }"
+      );
+    in
+    "  " + plugin.name + params + cfg + "\n";
+
+  # render a server
+  renderServer =
+    server:
+    let
+      zones = renderZones (server.zones or [ ]);
+      port = optionalString (server ? port && server.port != null) (":" + toString server.port);
+      plugins = concatStringsSep "" (map renderPlugin (server.plugins or [ ]));
+    in
+    zones + port + " {\n" + plugins + "}\n";
+
+  corefileString =
+    renderExtraConfig (coredns.extraConfig or { })
+    + "\n"
+    + concatStringsSep "\n" (map renderServer (coredns.servers or [ ]));
+
+  configMap = {
+    apiVersion = "v1";
+    kind = "ConfigMap";
+    metadata = {
+      name = fullname;
+      namespace = chart.release.namespace;
+      labels = labels;
+      annotations = coredns.customAnnotations;
+    };
+    data = {
+      "Corefile" = corefileString;
+    }
+    // lib.optionalAttrs (coredns.zoneFiles != [ ]) (
+      map (z: {
+        "${z.filename}" = z.contents;
+      }) coredns.zoneFiles
+    );
+  };
+
+  configMapDrv = pkgs.writeText "configmap.json" (builtins.toJSON configMap);
+
+  # TODO: app.kubernetes.io/version: {{ .Values.image.tag | default .Chart.AppVersion | replace ":" "-" | replace "@" "_" | trunc 63 | trimSuffix "-" | quote }}
+  imageTag = if coredns.image.tag == "" then chart.version else coredns.image.tag;
+
+  servers = coredns.servers or [];
+
+  # classify a scheme into udp/tcp flags
+  classify = scheme:
+    if scheme == "dns://" || scheme == "" then { isudp = true; istcp = false; }
+    else if scheme == "tls://" || scheme == "grpc://" || scheme == "https://" then { isudp = false; istcp = true; }
+    else { isudp = false; istcp = false; };
+
+  ####################################
+  # Service ports map construction
+  ####################################
+  buildServiceMap = builtins.foldl' (m: srv:
+    let
+      portKey = toString (srv.port);
+      existing = m."${portKey}" or {
+        isudp = false; istcp = false;
+        serviceport = (if srv ? servicePort then srv.servicePort else srv.port);
+      };
+
+      afterZones = builtins.foldl' (inner: z:
+        let
+          s = if z ? scheme then z.scheme else "";
+          cls = classify s;
+          inner1 = inner // (if cls.isudp then { isudp = true; } else {});
+          inner2 = inner1 // (if cls.istcp then { istcp = true; } else {});
+          inner3 = if (z ? use_tcp) && z.use_tcp then inner2 // { istcp = true; } else inner2;
+        in inner3
+      ) existing (srv.zones or []);
+
+      afterDefault = if (!afterZones.isudp && !afterZones.istcp) then afterZones // { isudp = true; } else afterZones;
+      afterNode = if srv ? nodePort then afterDefault // { nodePort = srv.nodePort; } else afterDefault;
+    in
+      m // { "${portKey}" = afterNode; }
+  ) {} servers;
+
+  renderServicePorts =
+    let ports = buildServiceMap; keys = builtins.attrNames ports;
+    in builtins.concatLists (map (k:
+      let p = ports."${k}";
+          make = proto:
+            let base = {
+              port = p.serviceport;
+              protocol = proto;
+              name = (if proto == "UDP" then "udp-" else "tcp-") + k;
+              targetPort = k; # string to avoid parsing issues
+            };
+            in if p ? nodePort then base // { nodePort = p.nodePort; } else base;
+      in (if p.isudp then [ (make "UDP") ] else []) ++ (if p.istcp then [ (make "TCP") ] else [])
+    ) keys);
+
+  ####################################
+  # Container ports map construction
+  ####################################
+  buildContainerMap = builtins.foldl' (m: srv:
+    let
+      portKey = toString (srv.port);
+      existing = m."${portKey}" or { isudp = false; istcp = false; };
+      afterZones = builtins.foldl' (inner: z:
+        let
+          s = if z ? scheme then z.scheme else "";
+          cls = classify s;
+          inner1 = inner // (if cls.isudp then { isudp = true; } else {});
+          inner2 = inner1 // (if cls.istcp then { istcp = true; } else {});
+          inner3 = if (z ? use_tcp) && z.use_tcp then inner2 // { istcp = true; } else inner2;
+        in inner3
+      ) existing (srv.zones or []);
+
+      afterDefault = if (!afterZones.isudp && !afterZones.istcp) then afterZones // { isudp = true; } else afterZones;
+      afterHost = if srv ? hostPort then afterDefault // { hostPort = srv.hostPort; } else afterDefault;
+
+      withSrv = m // { "${portKey}" = afterHost; };
+
+      # handle prometheus plugin(s) — add/overwrite prometheus port as tcp-only
+      withProm = builtins.foldl' (acc: pl:
+        if pl.name == "prometheus" then
+          let
+            parts = lib.splitString ":" (toString (pl.parameters or ""));
+            pport = if builtins.length parts > 1 then builtins.elemAt parts 1 else null;
+          in if pport == null then acc else acc // { "${pport}" = { isudp = false; istcp = true; }; }
+        else acc
+      ) withSrv (srv.plugins or []);
+    in
+      withProm
+  ) {} servers;
+
+  renderContainerPorts =
+    let ports = buildContainerMap; keys = builtins.attrNames ports;
+    in builtins.concatLists (map (k:
+      let p = ports."${k}";
+          make = proto:
+            let base = {
+              containerPort = k;
+              protocol = proto;
+              name = (if proto == "UDP" then "udp-" else "tcp-") + k;
+            };
+            in if p ? hostPort then base // { hostPort = p.hostPort; } else base;
+      in (if p.isudp then [ (make "UDP") ] else []) ++ (if p.istcp then [ (make "TCP") ] else [])
+    ) keys);
+
+  deployment = {
+    apiVersion = "apps/v1";
+    kind = "Deployment";
+    metadata = {
+      name = (coredns.deployment.name or fullname);
+      namespace = chart.release.namespace;
+      labels = labels // {
+        "app.kubernetes.io/version" = imageTag;
+      };
+      annotations = (coredns.customAnnotations // coredns.deployment.annotations);
+    };
+
+    spec =
+      lib.optionalAttrs ((!coredns.autoscaler.enabled) && (!coredns.hpa.enabled)) {
+        replicas = coredns.replicaCount;
+      }
+      // {
+        strategy = {
+          type = "RollingUpdate";
+          rollingUpdate = {
+            maxUnavailable = coredns.rollingUpdate.maxUnavailable;
+            maxSurge = coredns.rollingUpdate.maxSurge;
+          };
+        };
+
+        selector = (
+          if coredns.deployment.selector != { } then
+            coredns.deployment.selector
+          else
+            {
+              matchLabels = {
+                "app.kubernetes.io/instance" = chart.release.name;
+                "app.kubernetes.io/name" = chart.name;
+              }
+              // lib.optionalAttrs coredns.isClusterService {
+                "k8s-app" = coredns.k8sAppLabelOverride or chart.name;
+              };
+            }
+        );
+
+        template = {
+          metadata = {
+            labels =
+              lib.optionalAttrs coredns.isClusterService {
+                "k8s-app" = coredns.k8sAppLabelOverride or chart.name;
+              }
+              // {
+                "app.kubernetes.io/name" = chart.name;
+                "app.kubernetes.io/instance" = chart.release.name;
+              }
+              // coredns.customLabels;
+            annotations = {
+              "checksum/config" = "${configMapDrv}";
+              "nix.kix.dev/configmap-dependency" = "${configMapDrv}";
+            }
+            // lib.optionalAttrs coredns.isClusterService {
+              "scheduler.alpha.kubernetes.io/tolerations" = builtins.toJSON [
+                {
+                  key = "CriticalAddonsOnly";
+                  operator = "Exists";
+                }
+              ];
+            }
+            // coredns.podAnnotations;
+          };
+
+          spec =
+            lib.optionalAttrs (coredns.podSecurityContext != { }) {
+              securityContext = coredns.podSecurityContext;
+            }
+            // lib.optionalAttrs (coredns.terminationGracePeriodSeconds != null) {
+              terminationGracePeriodSeconds = coredns.terminationGracePeriodSeconds;
+            }
+            // {
+              serviceAccountName = serviceAccountName;
+            }
+            // lib.optionalAttrs (coredns.priorityClassName != null) {
+              priorityClassName = coredns.priorityClassName;
+            }
+            // lib.optionalAttrs (coredns.isClusterService) {
+              dnsPolicy = "Default";
+            }
+            // lib.optionalAttrs (coredns.affinity != null) {
+              affinity = coredns.affinity;
+            }
+            // lib.optionalAttrs (coredns.topologySpreadConstraints != null) {
+              topologySpreadConstraints = coredns.topologySpreadConstraints;
+            }
+            // lib.optionalAttrs (coredns.tolerations != null) {
+              tolerations = coredns.tolerations;
+            }
+            // lib.optionalAttrs (coredns.nodeSelector != null) {
+              nodeSelector = coredns.nodeSelector;
+            }
+            // lib.optionalAttrs (coredns.image.pullSecrets != null) {
+              imagePullSecrets = coredns.image.pullSecrets;
+            }
+            // lib.optionalAttrs (coredns.initContainers != null) {
+              initContainers = coredns.initContainers;
+            }
+            // {
+              containers = [
+                (
+                  {
+                    name = "coredns";
+                    image = "${coredns.image.repository}:${
+                      if coredns.image.tag != "" then coredns.image.tag else imageTag
+                    }";
+                    imagePullPolicy = coredns.image.pullPolicy;
+                    args = [
+                      "-conf"
+                      "/etc/coredns/Corefile"
+                    ];
+                    volumeMounts = (
+                      [
+                        {
+                          name = "config-volume";
+                          mountPath = "/etc/coredns";
+                        }
+                      ]
+                      ++ (map (s: {
+                        name = s.name;
+                        mountPath = s.mountPath;
+                        readOnly = true;
+                      }) coredns.extraSecrets)
+                      ++ (coredns.extra.extraVolumeMounts or [ ])
+                    );
+                    env = coredns.env;
+                    resources = coredns.resources;
+                    ports = renderContainerPorts;
+                  }
+                  // lib.optionalAttrs coredns.livenessProbe.enabled {
+                    livenessProbe = {
+                      httpGet = {
+                        path = "/health";
+                        port = 8080;
+                        scheme = "HTTP";
+                      };
+                      initialDelaySeconds = coredns.livenessProbe.initialDelaySeconds;
+                      periodSeconds = coredns.livenessProbe.periodSeconds;
+                      timeoutSeconds = coredns.livenessProbe.timeoutSeconds;
+                      successThreshold = coredns.livenessProbe.successThreshold;
+                      failureThreshold = coredns.livenessProbe.failureThreshold;
+                    };
+                  }
+                  // lib.optionalAttrs coredns.readinessProbe.enabled {
+                    readinessProbe = {
+                      httpGet = {
+                        path = "/ready";
+                        port = 8181;
+                        scheme = "HTTP";
+                      };
+                      initialDelaySeconds = coredns.readinessProbe.initialDelaySeconds;
+                      periodSeconds = coredns.readinessProbe.periodSeconds;
+                      timeoutSeconds = coredns.readinessProbe.timeoutSeconds;
+                      successThreshold = coredns.readinessProbe.successThreshold;
+                      failureThreshold = coredns.readinessProbe.failureThreshold;
+                    };
+                  }
+                  // lib.optionalAttrs (coredns.securityContext != { }) {
+                    securityContext = coredns.securityContext;
+                  }
+                )
+              ]
+              ++ (coredns.extraContainers or [ ]);
+            };
+
+          volumes = [
+            {
+              name = "config-volume";
+              configMap = {
+                name = fullname;
+                items = [
+                  {
+                    key = "Corefile";
+                    path = "Corefile";
+                  }
+                ]
+                ++ (map (z: {
+                  key = z.filename;
+                  path = z.filename;
+                }) coredns.zoneFiles);
+              };
+            }
+          ]
+          ++ (map (s: {
+            name = s.name;
+            secret = {
+              secretName = s.name;
+              defaultMode = s.defaultMode or 400;
+            };
+          }) coredns.extraSecrets)
+          ++ (coredns.extra.extraVolumes or [ ])
+          ++ (coredns.deployment.extraVolumes or [ ]);
+        };
+      };
+  };
+
+  deploymentDrv = pkgs.writeText "deployment.json" (builtins.toJSON deployment);
 in
 {
   # Export the options for module system integration
@@ -659,7 +1071,13 @@ in
     lib.optionalAttrs (coredns.autoscaler.enabled && !coredns.hpa.enabled) {
       "deployment-autoscaler.json" = deploymentAutoscalerDrv;
     }
+    // lib.optionalAttrs (coredns.deployment.enabled) {
+      "deployment.json" = deploymentDrv;
+    }
     // lib.optionalAttrs (coredns.deployment.enabled && coredns.rbac.create) {
       "clusterrole.json" = clusterRoleBindingDrv;
+    }
+    // lib.optionalAttrs (coredns.deployment.enabled && !coredns.deployment.skipConfig) {
+      "configmap.json" = configMapDrv;
     };
 }
