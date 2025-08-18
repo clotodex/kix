@@ -282,7 +282,7 @@ let
         annotations = { };
         selector = { };
         serviceType = "ClusterIP";
-        # Unset/optional Kubernetes Service fields mirrored from values.yaml:
+        # Unset/optional Kubernetes Service fields mirrored from coredns.yaml:
         clusterIP = null;
         clusterIPs = [ ];
         loadBalancerIP = null;
@@ -353,7 +353,6 @@ let
   };
 
   # like in the define
-  name = chart.name;
   fullname = "${chart.release.name}-${chart.name}";
 
   labels = {
@@ -440,6 +439,29 @@ let
     builtins.toJSON clusterroleAutoscaler
   );
 
+  #  serviceaccount-autoscaler.yaml
+
+  serviceAccountAutoScaler = {
+    apiVersion = "v1";
+    kind = "ServiceAccount";
+    metadata = {
+      name = "${fullname}-autoscaler";
+      namespace = chart.release.namespace;
+      labels = labelsAutoscaler;
+    }
+    // lib.optionalAttrs (coredns ? customAnnotations) {
+      annotations = coredns.customAnnotations;
+    };
+
+    # only add if pullSecrets defined
+    imagePullSecrets = lib.optional (
+      coredns.autoscaler.image ? pullSecrets
+    ) coredns.autoscaler.image.pullSecrets;
+  };
+  serviceAccountAutoScalerDrv = pkgs.writeText "serviceaccount-autoscaler.json" (
+    builtins.toJSON serviceAccountAutoScaler
+  );
+
   clusterRoleAutoScalerBinding = {
     apiVersion = "rbac.authorization.k8s.io/v1";
     kind = "ClusterRoleBinding";
@@ -447,7 +469,8 @@ let
       name = "${fullname}-autoscaler";
       labels = labelsAutoscaler;
       annotations = coredns.customAnnotations // {
-        "nix.kix.dev/configmap-dependency" = "${clusterRoleAutoScalerDrv}";
+        "nix.kix.dev/autoscalerclusterrole-dependency" = "${clusterRoleAutoScalerDrv}";
+        "nix.kix.dev/autoscalerserviceaccount-dependency" = "${serviceAccountAutoScalerDrv}";
       };
     };
     roleRef = {
@@ -658,6 +681,29 @@ let
 
   serviceAccountName = (coredns.serviceAccount.name or "${fullname}"); # TODO: lib.optionalString coredns.serviceAccount.create -> otherwise "default"
 
+  #  serviceaccount.yaml
+
+  serviceAccount = {
+    apiVersion = "v1";
+    kind = "ServiceAccount";
+    metadata = {
+      name = serviceAccountName;
+      namespace = chart.release.namespace;
+      inherit labels;
+    }
+    //
+      lib.optionalAttrs
+        (
+          (coredns ? serviceAccount && coredns.serviceAccount ? annotations) || (coredns ? customAnnotations)
+        )
+        {
+          annotations = (coredns.customAnnotations or { }) // (coredns.serviceAccount.annotations or { });
+        };
+
+    imagePullSecrets = lib.optional (coredns.image ? pullSecrets) coredns.image.pullSecrets;
+  };
+  serviceAccountDrv = pkgs.writeText "serviceaccount.json" (builtins.toJSON serviceAccount);
+
   clusterRoleBinding = {
     apiVersion = "rbac.authorization.k8s.io/v1";
     kind = "ClusterRoleBinding";
@@ -665,7 +711,8 @@ let
       name = fullname;
       labels = labels;
       annotations = coredns.customAnnotations // {
-        "nix.kix.dev/configmap-dependency" = "${clusterRoleDrv}";
+        "nix.kix.dev/clusterrole-dependency" = "${clusterRoleDrv}";
+        "nix.kix.dev/serviceaccount-dependency" = "${serviceAccountDrv}";
       };
     };
     roleRef = {
@@ -760,107 +807,170 @@ let
 
   configMapDrv = pkgs.writeText "configmap.json" (builtins.toJSON configMap);
 
-  # TODO: app.kubernetes.io/version: {{ .Values.image.tag | default .Chart.AppVersion | replace ":" "-" | replace "@" "_" | trunc 63 | trimSuffix "-" | quote }}
+  # TODO: app.kubernetes.io/version: {{ .coredns.image.tag | default .Chart.AppVersion | replace ":" "-" | replace "@" "_" | trunc 63 | trimSuffix "-" | quote }}
   imageTag = if coredns.image.tag == "" then chart.version else coredns.image.tag;
 
-  servers = coredns.servers or [];
+  servers = coredns.servers or [ ];
 
   # classify a scheme into udp/tcp flags
-  classify = scheme:
-    if scheme == "dns://" || scheme == "" then { isudp = true; istcp = false; }
-    else if scheme == "tls://" || scheme == "grpc://" || scheme == "https://" then { isudp = false; istcp = true; }
-    else { isudp = false; istcp = false; };
+  classify =
+    scheme:
+    if scheme == "dns://" || scheme == "" then
+      {
+        isudp = true;
+        istcp = false;
+      }
+    else if scheme == "tls://" || scheme == "grpc://" || scheme == "https://" then
+      {
+        isudp = false;
+        istcp = true;
+      }
+    else
+      {
+        isudp = false;
+        istcp = false;
+      };
 
   ####################################
   # Service ports map construction
   ####################################
-  buildServiceMap = builtins.foldl' (m: srv:
+  buildServiceMap = builtins.foldl' (
+    m: srv:
     let
       portKey = toString (srv.port);
-      existing = m."${portKey}" or {
-        isudp = false; istcp = false;
-        serviceport = (if srv ? servicePort then srv.servicePort else srv.port);
-      };
+      existing =
+        m."${portKey}" or {
+          isudp = false;
+          istcp = false;
+          serviceport = (if srv ? servicePort then srv.servicePort else srv.port);
+        };
 
-      afterZones = builtins.foldl' (inner: z:
+      afterZones = builtins.foldl' (
+        inner: z:
         let
           s = if z ? scheme then z.scheme else "";
           cls = classify s;
-          inner1 = inner // (if cls.isudp then { isudp = true; } else {});
-          inner2 = inner1 // (if cls.istcp then { istcp = true; } else {});
+          inner1 = inner // (if cls.isudp then { isudp = true; } else { });
+          inner2 = inner1 // (if cls.istcp then { istcp = true; } else { });
           inner3 = if (z ? use_tcp) && z.use_tcp then inner2 // { istcp = true; } else inner2;
-        in inner3
-      ) existing (srv.zones or []);
+        in
+        inner3
+      ) existing (srv.zones or [ ]);
 
-      afterDefault = if (!afterZones.isudp && !afterZones.istcp) then afterZones // { isudp = true; } else afterZones;
+      afterDefault =
+        if (!afterZones.isudp && !afterZones.istcp) then afterZones // { isudp = true; } else afterZones;
       afterNode = if srv ? nodePort then afterDefault // { nodePort = srv.nodePort; } else afterDefault;
     in
-      m // { "${portKey}" = afterNode; }
-  ) {} servers;
+    m // { "${portKey}" = afterNode; }
+  ) { } servers;
 
   renderServicePorts =
-    let ports = buildServiceMap; keys = builtins.attrNames ports;
-    in builtins.concatLists (map (k:
-      let p = ports."${k}";
-          make = proto:
-            let base = {
-              port = p.serviceport;
-              protocol = proto;
-              name = (if proto == "UDP" then "udp-" else "tcp-") + k;
-              targetPort = k; # string to avoid parsing issues
-            };
-            in if p ? nodePort then base // { nodePort = p.nodePort; } else base;
-      in (if p.isudp then [ (make "UDP") ] else []) ++ (if p.istcp then [ (make "TCP") ] else [])
-    ) keys);
+    let
+      ports = buildServiceMap;
+      keys = builtins.attrNames ports;
+    in
+    builtins.concatLists (
+      map (
+        k:
+        let
+          p = ports."${k}";
+          make =
+            proto:
+            let
+              base = {
+                port = p.serviceport;
+                protocol = proto;
+                name = (if proto == "UDP" then "udp-" else "tcp-") + k;
+                targetPort = k; # string to avoid parsing issues
+              };
+            in
+            if p ? nodePort then base // { nodePort = p.nodePort; } else base;
+        in
+        (if p.isudp then [ (make "UDP") ] else [ ]) ++ (if p.istcp then [ (make "TCP") ] else [ ])
+      ) keys
+    );
 
   ####################################
   # Container ports map construction
   ####################################
-  buildContainerMap = builtins.foldl' (m: srv:
+  buildContainerMap = builtins.foldl' (
+    m: srv:
     let
       portKey = toString (srv.port);
-      existing = m."${portKey}" or { isudp = false; istcp = false; };
-      afterZones = builtins.foldl' (inner: z:
+      existing =
+        m."${portKey}" or {
+          isudp = false;
+          istcp = false;
+        };
+      afterZones = builtins.foldl' (
+        inner: z:
         let
           s = if z ? scheme then z.scheme else "";
           cls = classify s;
-          inner1 = inner // (if cls.isudp then { isudp = true; } else {});
-          inner2 = inner1 // (if cls.istcp then { istcp = true; } else {});
+          inner1 = inner // (if cls.isudp then { isudp = true; } else { });
+          inner2 = inner1 // (if cls.istcp then { istcp = true; } else { });
           inner3 = if (z ? use_tcp) && z.use_tcp then inner2 // { istcp = true; } else inner2;
-        in inner3
-      ) existing (srv.zones or []);
+        in
+        inner3
+      ) existing (srv.zones or [ ]);
 
-      afterDefault = if (!afterZones.isudp && !afterZones.istcp) then afterZones // { isudp = true; } else afterZones;
+      afterDefault =
+        if (!afterZones.isudp && !afterZones.istcp) then afterZones // { isudp = true; } else afterZones;
       afterHost = if srv ? hostPort then afterDefault // { hostPort = srv.hostPort; } else afterDefault;
 
-      withSrv = m // { "${portKey}" = afterHost; };
+      withSrv = m // {
+        "${portKey}" = afterHost;
+      };
 
       # handle prometheus plugin(s) — add/overwrite prometheus port as tcp-only
-      withProm = builtins.foldl' (acc: pl:
+      withProm = builtins.foldl' (
+        acc: pl:
         if pl.name == "prometheus" then
           let
             parts = lib.splitString ":" (toString (pl.parameters or ""));
             pport = if builtins.length parts > 1 then builtins.elemAt parts 1 else null;
-          in if pport == null then acc else acc // { "${pport}" = { isudp = false; istcp = true; }; }
-        else acc
-      ) withSrv (srv.plugins or []);
+          in
+          if pport == null then
+            acc
+          else
+            acc
+            // {
+              "${pport}" = {
+                isudp = false;
+                istcp = true;
+              };
+            }
+        else
+          acc
+      ) withSrv (srv.plugins or [ ]);
     in
-      withProm
-  ) {} servers;
+    withProm
+  ) { } servers;
 
   renderContainerPorts =
-    let ports = buildContainerMap; keys = builtins.attrNames ports;
-    in builtins.concatLists (map (k:
-      let p = ports."${k}";
-          make = proto:
-            let base = {
-              containerPort = k;
-              protocol = proto;
-              name = (if proto == "UDP" then "udp-" else "tcp-") + k;
-            };
-            in if p ? hostPort then base // { hostPort = p.hostPort; } else base;
-      in (if p.isudp then [ (make "UDP") ] else []) ++ (if p.istcp then [ (make "TCP") ] else [])
-    ) keys);
+    let
+      ports = buildContainerMap;
+      keys = builtins.attrNames ports;
+    in
+    builtins.concatLists (
+      map (
+        k:
+        let
+          p = ports."${k}";
+          make =
+            proto:
+            let
+              base = {
+                containerPort = k;
+                protocol = proto;
+                name = (if proto == "UDP" then "udp-" else "tcp-") + k;
+              };
+            in
+            if p ? hostPort then base // { hostPort = p.hostPort; } else base;
+        in
+        (if p.isudp then [ (make "UDP") ] else [ ]) ++ (if p.istcp then [ (make "TCP") ] else [ ])
+      ) keys
+    );
 
   deployment = {
     apiVersion = "apps/v1";
@@ -1061,6 +1171,246 @@ let
   };
 
   deploymentDrv = pkgs.writeText "deployment.json" (builtins.toJSON deployment);
+
+  #  hpa.yaml
+
+  Capabilities = {
+    "APIVersions" = [
+      "autoscaling/v2"
+      "autoscaling/v2beta2"
+    ];
+  };
+
+  apiVersion =
+    if lib.elem "autoscaling/v2" (Capabilities.APIVersions or [ ]) then
+      "autoscaling/v2"
+    else
+      "autoscaling/v2beta2";
+
+  hpa = {
+    apiVersion = apiVersion;
+    kind = "HorizontalPodAutoscaler";
+    metadata = {
+      name = (coredns.deployment.name or coredns.fullname or "coredns"); # helm: default (include "coredns.fullname" .)
+      namespace = chart.release.namespace;
+      labels = (coredns.labels or { }); # helm: include "coredns.labels"
+    }
+    // (coredns.customLabels or { })
+    // (
+      if coredns ? customAnnotations && coredns.customAnnotations != { } then
+        { annotations = coredns.customAnnotations; }
+      else
+        { }
+    );
+
+    spec = {
+      scaleTargetRef = {
+        apiVersion = "apps/v1";
+        kind = "Deployment";
+        name = (coredns.deployment.name or coredns.fullname or "coredns");
+      };
+      minReplicas = coredns.hpa.minReplicas;
+      maxReplicas = coredns.hpa.maxReplicas;
+      metrics = coredns.hpa.metrics;
+    }
+    // (if coredns.hpa ? behavior then { behavior = coredns.hpa.behavior; } else { });
+  };
+
+  hpaDrv = pkgs.writeText "hpa.json" (builtins.toJSON hpa);
+
+  #  poddisruptionbudget.yaml
+
+  # TODO: dependencies
+  podDisruptionBudget = {
+    apiVersion = "policy/v1";
+    kind = "PodDisruptionBudget";
+    metadata = {
+      # You can decide how to generate fullname; here just use release name + chart name
+      name = "${chart.release.name}-coredns";
+      namespace = chart.release.namespace;
+
+      labels = (coredns.labels or { }) // (coredns.customLabels or { });
+
+      annotations = coredns.customAnnotations or { };
+    };
+
+    spec =
+      let
+        baseSelector =
+          if coredns.podDisruptionBudget ? selector then
+            { }
+          else
+            {
+              selector.matchLabels = {
+                "app.kubernetes.io/instance" = chart.release.name;
+                "app.kubernetes.io/name" = "coredns";
+              }
+              // lib.optionalAttrs (coredns.isClusterService or false) {
+                "k8s-app" = "kube-dns";
+              };
+            };
+      in
+      baseSelector // coredns.podDisruptionBudget;
+  };
+
+  podDisruptionBudgetDrv = pkgs.writeText "poddisruptionbudget.json" (
+    builtins.toJSON podDisruptionBudget
+  );
+
+  #  service-metrics.yaml
+
+  serviceMetrics = {
+    apiVersion = "v1";
+    kind = "Service";
+    metadata = {
+      name = "${coredns.name or "coredns"}-metrics"; # would use fullname template in Helm
+      namespace = chart.release.namespace;
+      labels =
+        (coredns.labels or { })
+        // {
+          "app.kubernetes.io/component" = "metrics";
+        }
+        // (coredns.customLabels or { });
+      annotations =
+        (coredns.prometheus.service.annotations or { })
+        // (coredns.service.annotations or { })
+        // (coredns.customAnnotations or { });
+    };
+    spec = {
+      selector =
+        if (coredns.prometheus.service.selector or null) != null then
+          coredns.prometheus.service.selector
+        else
+          {
+            "app.kubernetes.io/instance" = chart.release.name;
+            "app.kubernetes.io/name" = chart.name or coredns.name or "coredns";
+          }
+          // (lib.optionalAttrs (coredns.isClusterService or false) {
+            "k8s-app" = coredns.k8sAppLabelOverride or "coredns";
+          });
+
+      ports = [
+        {
+          name = "metrics";
+          port = 9153;
+          targetPort = 9153;
+        }
+      ];
+    };
+  };
+  serviceMetricsDrv = pkgs.writeText "service-metrics.json" (builtins.toJSON serviceMetrics);
+
+  #  service.yaml
+
+  svcName = coredns.service.name or "coredns";
+  annotations = (coredns.service.annotations or { }) // (coredns.customAnnotations or { });
+  selector =
+    if coredns.service.selector or null != null then
+      coredns.service.selector
+    else
+      {
+        "app.kubernetes.io/instance" = chart.release.name;
+        "app.kubernetes.io/name" = "coredns";
+      }
+      // lib.optionalAttrs (coredns.isClusterService or false) {
+        k8s-app = coredns.k8sAppLabelOverride or "coredns";
+      };
+  service = {
+    apiVersion = "v1";
+    kind = "Service";
+    metadata = {
+      name = svcName;
+      namespace = chart.release.namespace;
+      inherit labels annotations;
+    };
+    spec = {
+      inherit selector;
+      type = coredns.serviceType or "ClusterIP";
+      ports = renderServicePorts;
+    }
+    // lib.optionalAttrs (coredns.service.clusterIP or null != null) {
+      clusterIP = coredns.service.clusterIP;
+    }
+    // lib.optionalAttrs (coredns.service.clusterIPs or null != null) {
+      clusterIPs = coredns.service.clusterIPs;
+    }
+    // lib.optionalAttrs (coredns.service.externalIPs or null != null) {
+      externalIPs = coredns.service.externalIPs;
+    }
+    // lib.optionalAttrs (coredns.service.externalTrafficPolicy or null != null) {
+      externalTrafficPolicy = coredns.service.externalTrafficPolicy;
+    }
+    // lib.optionalAttrs (coredns.service.loadBalancerIP or null != null) {
+      loadBalancerIP = coredns.service.loadBalancerIP;
+    }
+    // lib.optionalAttrs (coredns.service.loadBalancerClass or null != null) {
+      loadBalancerClass = coredns.service.loadBalancerClass;
+    }
+    // lib.optionalAttrs (coredns.service.ipFamilyPolicy or null != null) {
+      ipFamilyPolicy = coredns.service.ipFamilyPolicy;
+    }
+    // lib.optionalAttrs (coredns.service.trafficDistribution or null != null) {
+      trafficDistribution = coredns.service.trafficDistribution;
+    };
+  };
+
+  serviceDrv = pkgs.writeText "service.json" (builtins.toJSON service);
+
+  #  servicemonitor.yaml
+
+  serviceMonitor = {
+    apiVersion = "monitoring.coreos.com/v1";
+    kind = "ServiceMonitor";
+
+    metadata = {
+      name = fullname;
+      labels = labels // (coredns.prometheus.monitor.additionalLabels or { });
+    }
+    // lib.optionalAttrs (coredns.prometheus.monitor ? namespace) {
+      namespace = coredns.prometheus.monitor.namespace;
+    }
+    // lib.optionalAttrs (coredns ? customAnnotations) {
+      annotations = coredns.customAnnotations;
+    };
+
+    spec =
+      { }
+      //
+        lib.optionalAttrs
+          ((coredns.prometheus.monitor.namespace or chart.release.namespace) != chart.release.namespace)
+          {
+            namespaceSelector.matchNames = [ chart.release.namespace ];
+          }
+      // {
+        selector =
+          if coredns.prometheus.monitor ? selector then
+            coredns.prometheus.monitor.selector
+          else
+            {
+              matchLabels = {
+                "app.kubernetes.io/instance" = chart.release.name;
+                "app.kubernetes.io/name" = chart.name;
+                "app.kubernetes.io/component" = "metrics";
+              }
+              // lib.optionalAttrs (coredns.isClusterService or false) {
+                k8s-app = "kube-dns"; # like template "coredns.k8sapplabel"
+              };
+            };
+
+        endpoints = [
+          (
+            {
+              port = "metrics";
+            }
+            // lib.optionalAttrs (coredns.prometheus.monitor ? interval) {
+              interval = coredns.prometheus.monitor.interval;
+            }
+          )
+        ];
+      };
+  };
+  serviceMonitorDrv = pkgs.writeText "servicemonitor.json" (builtins.toJSON serviceMonitor);
+
 in
 {
   # Export the options for module system integration
@@ -1071,13 +1421,27 @@ in
     lib.optionalAttrs (coredns.autoscaler.enabled && !coredns.hpa.enabled) {
       "deployment-autoscaler.json" = deploymentAutoscalerDrv;
     }
+    // lib.optionalAttrs (!coredns.autoscaler.enabled && coredns.hpa.enabled) {
+      "hpa.json" = hpaDrv;
+    }
     // lib.optionalAttrs (coredns.deployment.enabled) {
       "deployment.json" = deploymentDrv;
+      "service.json" = serviceDrv;
     }
     // lib.optionalAttrs (coredns.deployment.enabled && coredns.rbac.create) {
       "clusterrole.json" = clusterRoleBindingDrv;
     }
     // lib.optionalAttrs (coredns.deployment.enabled && !coredns.deployment.skipConfig) {
       "configmap.json" = configMapDrv;
+    }
+    // lib.optionalAttrs (coredns.deployment.enabled && (coredns.podDisruptionBudget != null)) {
+      "poddisruptionbudget.json" = podDisruptionBudgetDrv;
+    }
+    // lib.optionalAttrs (coredns.deployment.enabled && coredns.prometheus.service.enabled) {
+      "servicemetrics.json" = serviceMetricsDrv;
+    }
+
+    // lib.optionalAttrs (coredns.deployment.enabled && coredns.prometheus.monitor.enabled) {
+      "servicemonitor.json" = serviceMonitorDrv;
     };
 }
