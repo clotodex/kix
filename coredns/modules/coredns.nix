@@ -9,63 +9,245 @@ let
   types = lib.types;
 
   options.services.coredns = {
-    autoscaler = lib.mkOption {
-      type = types.attrs;
-      default = {
-        enabled = false;
-      };
-      apply =
-        userValue:
-        lib.mkMerge [
-          {
-            enabled = false;
-            coresPerReplica = 256;
-            nodesPerReplica = 16;
-            min = 0;
-            max = 0;
-            includeUnschedulableNodes = false;
-            preventSinglePointFailure = true;
-            podAnnotations = { };
-            customFlags = [ ]; # list of strings like "--nodelabels=..."
-            image = {
-              repository = "registry.k8s.io/cpa/cluster-proportional-autoscaler";
-              tag = "v1.9.0";
-              pullPolicy = "IfNotPresent";
-              pullSecrets = [ ];
-            };
-            priorityClassName = "";
-            affinity = { };
-            nodeSelector = { };
-            tolerations = [ ];
-            resources = {
-              requests = {
-                cpu = "20m";
-                memory = "10Mi";
-              };
-              limits = {
-                cpu = "20m";
-                memory = "10Mi";
-              };
-            };
-            configmap = {
-              annotations = { };
-            };
-            livenessProbe = {
-              enabled = true;
-              initialDelaySeconds = 10;
-              periodSeconds = 5;
-              timeoutSeconds = 5;
-              failureThreshold = 3;
-              successThreshold = 1;
-            };
-            extraContainers = [ ];
-          }
-          userValue
-        ];
-      description = "Cluster-proportional-autoscaler (CPA) configuration for CoreDNS deployment.";
+    enable = lib.mkOption {
+      type = types.bool;
+      default = false;
+      description = "Enable CoreDNS service.";
     };
+    autoscaler = lib.mkOption {
+      description = "Cluster-proportional-autoscaler (CPA) configuration for CoreDNS deployment.";
+      default = { };
+      type = types.submodule {
+        options = {
+          enabled = lib.mkOption {
+            type = types.bool;
+            default = false;
+          };
+
+          coresPerReplica = lib.mkOption {
+            type = types.int;
+            default = 256;
+          };
+
+          nodesPerReplica = lib.mkOption {
+            type = types.int;
+            default = 16;
+          };
+
+          min = lib.mkOption {
+            type = types.int;
+            default = 0;
+          };
+
+          max = lib.mkOption {
+            type = types.int;
+            default = 0;
+          };
+
+          includeUnschedulableNodes = lib.mkOption {
+            type = types.bool;
+            default = false;
+          };
+
+          preventSinglePointFailure = lib.mkOption {
+            type = types.bool;
+            default = true;
+          };
+
+          podAnnotations = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+          };
+
+          customFlags = lib.mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            description = "List of extra flags like \"--nodelabels=...\"";
+          };
+
+          image = lib.mkOption {
+            type = types.submodule {
+              options = {
+                repository = lib.mkOption {
+                  type = types.str;
+                  default = "registry.k8s.io/cpa/cluster-proportional-autoscaler";
+                };
+                tag = lib.mkOption {
+                  type = types.str;
+                  default = "v1.9.0";
+                };
+                pullPolicy = lib.mkOption {
+                  type = types.str;
+                  default = "IfNotPresent";
+                };
+                pullSecrets = lib.mkOption {
+                  type = types.listOf types.str;
+                  default = [ ];
+                };
+              };
+            };
+            default = { };
+          };
+
+          priorityClassName = lib.mkOption {
+            type = types.str;
+            default = "";
+          };
+
+          affinity = lib.mkOption {
+            type = types.attrsOf types.anything;
+            default = { };
+          };
+
+          nodeSelector = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+          };
+
+          tolerations = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+
+          resources = lib.mkOption {
+            type = types.submodule {
+              options = {
+                requests = lib.mkOption {
+                  type = types.attrsOf types.str;
+                  default = {
+                    cpu = "20m";
+                    memory = "10Mi";
+                  };
+                };
+                limits = lib.mkOption {
+                  type = types.attrsOf types.str;
+                  default = {
+                    cpu = "20m";
+                    memory = "10Mi";
+                  };
+                };
+              };
+            };
+            default = { };
+          };
+
+          configmap = lib.mkOption {
+            type = types.submodule {
+              options = {
+                annotations = lib.mkOption {
+                  type = types.attrsOf types.str;
+                  default = { };
+                };
+              };
+            };
+            default = { };
+          };
+
+          livenessProbe = lib.mkOption {
+            type = types.submodule {
+              options = {
+                enabled = lib.mkOption {
+                  type = types.bool;
+                  default = true;
+                };
+                initialDelaySeconds = lib.mkOption {
+                  type = types.int;
+                  default = 10;
+                };
+                periodSeconds = lib.mkOption {
+                  type = types.int;
+                  default = 5;
+                };
+                timeoutSeconds = lib.mkOption {
+                  type = types.int;
+                  default = 5;
+                };
+                failureThreshold = lib.mkOption {
+                  type = types.int;
+                  default = 3;
+                };
+                successThreshold = lib.mkOption {
+                  type = types.int;
+                  default = 1;
+                };
+              };
+            };
+            default = { };
+          };
+
+          extraContainers = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+        };
+      };
+    };
+
     deployment = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          skipConfig = lib.mkOption {
+            type = types.bool;
+            default = false;
+          };
+          enabled = lib.mkOption {
+            type = types.bool;
+            default = true;
+          };
+          name = lib.mkOption {
+            type = types.str;
+            default = "";
+          };
+          annotations = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+          };
+          selector = lib.mkOption {
+            type = types.attrsOf types.anything;
+            default = { };
+          };
+          initContainers = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          affinity = lib.mkOption {
+            type = types.attrsOf types.anything;
+            default = { };
+          };
+          topologySpreadConstraints = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          nodeSelector = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+          };
+          tolerations = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraContainers = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraVolumes = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraVolumeMounts = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraSecrets = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          env = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+        };
+      };
       default = {
         skipConfig = false;
         enabled = true;
@@ -77,7 +259,6 @@ let
         topologySpreadConstraints = [ ];
         nodeSelector = { };
         tolerations = [ ];
-        podDisruptionBudget = { };
         extraContainers = [ ];
         extraVolumes = [ ];
         extraVolumeMounts = [ ];
@@ -87,8 +268,32 @@ let
       description = "Deployment-level configuration for CoreDNS (pods, selectors, topologySpreadConstraints, extra volumes, env, etc).";
     };
 
+    podDisruptionBudget = lib.mkOption {
+      type = types.attrsOf types.anything;
+      default = { };
+    };
+
     hpa = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          enabled = lib.mkOption {
+            type = types.bool;
+            default = false;
+          };
+          minReplicas = lib.mkOption {
+            type = types.int;
+            default = 1;
+          };
+          maxReplicas = lib.mkOption {
+            type = types.int;
+            default = 2;
+          };
+          metrics = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+        };
+      };
       default = {
         enabled = false;
         minReplicas = 1;
@@ -98,7 +303,34 @@ let
       description = "Optional Horizontal Pod Autoscaler (HPA) configuration for CoreDNS.";
     };
     extra = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          extraConfig = lib.mkOption {
+            type = types.attrsOf types.anything;
+            default = { };
+          };
+          extraContainers = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraVolumes = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraVolumeMounts = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          extraSecrets = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+          env = lib.mkOption {
+            type = types.listOf types.attrs;
+            default = [ ];
+          };
+        };
+      };
       default = {
         extraConfig = { };
         extraContainers = [ ];
@@ -110,7 +342,26 @@ let
       description = "Extra files/containers/volumes/secrets/env for CoreDNS pods.";
     };
     image = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          repository = lib.mkOption {
+            type = types.str;
+            default = "coredns/coredns";
+          };
+          tag = lib.mkOption {
+            type = types.str;
+            default = "";
+          };
+          pullPolicy = lib.mkOption {
+            type = types.str;
+            default = "IfNotPresent";
+          };
+          pullSecrets = lib.mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+          };
+        };
+      };
       default = {
         repository = "coredns/coredns";
         tag = ""; # defaults to chart appVersion in helm
@@ -120,7 +371,34 @@ let
       description = "Container image configuration for CoreDNS.";
     };
     livenessProbe = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          enabled = lib.mkOption {
+            type = types.bool;
+            default = true;
+          };
+          initialDelaySeconds = lib.mkOption {
+            type = types.int;
+            default = 60;
+          };
+          periodSeconds = lib.mkOption {
+            type = types.int;
+            default = 10;
+          };
+          timeoutSeconds = lib.mkOption {
+            type = types.int;
+            default = 5;
+          };
+          failureThreshold = lib.mkOption {
+            type = types.int;
+            default = 5;
+          };
+          successThreshold = lib.mkOption {
+            type = types.int;
+            default = 1;
+          };
+        };
+      };
       default = {
         enabled = true;
         initialDelaySeconds = 60;
@@ -133,7 +411,34 @@ let
     };
 
     readinessProbe = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          enabled = lib.mkOption {
+            type = types.bool;
+            default = true;
+          };
+          initialDelaySeconds = lib.mkOption {
+            type = types.int;
+            default = 30;
+          };
+          periodSeconds = lib.mkOption {
+            type = types.int;
+            default = 5;
+          };
+          timeoutSeconds = lib.mkOption {
+            type = types.int;
+            default = 5;
+          };
+          failureThreshold = lib.mkOption {
+            type = types.int;
+            default = 1;
+          };
+          successThreshold = lib.mkOption {
+            type = types.int;
+            default = 1;
+          };
+        };
+      };
       default = {
         enabled = true;
         initialDelaySeconds = 30;
@@ -151,7 +456,24 @@ let
     };
 
     resources = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          limits = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = {
+              cpu = "100m";
+              memory = "128Mi";
+            };
+          };
+          requests = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = {
+              cpu = "100m";
+              memory = "128Mi";
+            };
+          };
+        };
+      };
       default = {
         limits = {
           cpu = "100m";
@@ -166,7 +488,7 @@ let
     };
 
     rollingUpdate = lib.mkOption {
-      type = types.attrs;
+      type = types.attrsOf types.anything;
       default = {
         maxUnavailable = 1;
         maxSurge = "25%";
@@ -186,13 +508,33 @@ let
       description = "Optional priority class name used for CoreDNS pods.";
     };
     podSecurityContext = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = { }; # flexible mapping; default is an empty attribute set
+      };
       default = { };
       description = "Pod-level securityContext for CoreDNS pods.";
     };
 
     securityContext = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          allowPrivilegeEscalation = lib.mkOption {
+            type = types.bool;
+            default = false;
+          };
+          capabilities = lib.mkOption {
+            type = types.attrsOf types.anything;
+            default = {
+              add = [ "NET_BIND_SERVICE" ];
+              drop = [ "ALL" ];
+            };
+          };
+          readOnlyRootFilesystem = lib.mkOption {
+            type = types.bool;
+            default = true;
+          };
+        };
+      };
       default = {
         allowPrivilegeEscalation = false;
         capabilities = {
@@ -205,12 +547,96 @@ let
     };
 
     podAnnotations = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = { }; # arbitrary annotations map
+      };
       default = { };
       description = "Annotations applied to CoreDNS pods.";
     };
     servers = lib.mkOption {
-      type = types.listOf types.attrs;
+      type = types.listOf (
+        types.submodule {
+          options = {
+            port = lib.mkOption {
+              type = types.int;
+              default = 53;
+              description = "Port number for this server block.";
+            };
+
+            servicePort = lib.mkOption {
+              type = types.nullOr types.int;
+              default = null;
+              description = "Service port (defaults to server port).";
+            };
+
+            nodePort = lib.mkOption {
+              type = types.nullOr types.int;
+              default = null;
+              description = "NodePort for this server.";
+            };
+
+            hostPort = lib.mkOption {
+              type = types.nullOr types.int;
+              default = null;
+              description = "HostPort for this server.";
+            };
+
+            zones = lib.mkOption {
+              type = types.listOf (
+                types.submodule {
+                  options = {
+                    zone = lib.mkOption {
+                      type = types.str;
+                      description = "DNS zone string (e.g. \".\").";
+                    };
+
+                    scheme = lib.mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "Zone scheme (dns://, tls://, grpc://, https://) or null for default.";
+                    };
+
+                    use_tcp = lib.mkOption {
+                      type = types.bool;
+                      default = false;
+                      description = "If true, treat this zone as TCP-enabled.";
+                    };
+                  };
+                }
+              );
+              default = [ { zone = "."; } ];
+              description = "List of zones for this server.";
+            };
+
+            plugins = lib.mkOption {
+              type = types.listOf (
+                types.submodule {
+                  options = {
+                    name = lib.mkOption {
+                      type = types.str;
+                      description = "Plugin name (e.g. errors, health, kubernetes).";
+                    };
+
+                    parameters = lib.mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "Plugin parameters (string).";
+                    };
+
+                    configBlock = lib.mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "Optional plugin config block (multiline string).";
+                    };
+                  };
+                }
+              );
+              default = [ ];
+              description = "List of CoreDNS plugins for this server.";
+            };
+          };
+        }
+      );
       default = [
         {
           zones = [
@@ -220,63 +646,103 @@ let
             }
           ];
           port = 53;
-          # servicePort / nodePort / hostPort can be null/unset
           servicePort = null;
           nodePort = null;
           hostPort = null;
-          plugins = [
-            { name = "errors"; }
-            {
-              name = "health";
-              configBlock = ''lameduck 10s'';
-            }
-            { name = "ready"; }
-            {
-              name = "kubernetes";
-              parameters = [
-                "cluster.local"
-                "in-addr.arpa"
-                "ip6.arpa"
-              ];
-              configBlock = ''pods insecure\nfallthrough in-addr.arpa ip6.arpa\nttl 30'';
-            }
-            {
-              name = "prometheus";
-              parameters = [ "0.0.0.0:9153" ];
-            }
-            {
-              name = "forward";
-              parameters = [
-                "."
-                "/etc/resolv.conf"
-              ];
-            }
-            {
-              name = "cache";
-              parameters = [ 30 ];
-            }
-            { name = "loop"; }
-            { name = "reload"; }
-            { name = "loadbalance"; }
-          ];
+          plugins = [ { name = "errors"; } ];
         }
       ];
-      description = "List of server blocks (CoreDNS servers). Each item is an attribute set describing zones, port and plugins.";
+      description = "List of server blocks (CoreDNS servers). Each item is a typed submodule describing zones, port and plugins.";
     };
 
     extraConfig = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = { }; # dynamic config mapping
+      };
       default = { };
       description = "Additional CoreDNS configuration applied outside the default zone block (e.g. import parameters).";
     };
 
     zoneFiles = lib.mkOption {
-      type = types.listOf types.attrs;
+      type = types.listOf (
+        types.submodule {
+          options = {
+            filename = lib.mkOption {
+              type = types.str;
+              default = "";
+            };
+            domain = lib.mkOption {
+              type = types.str;
+              default = "";
+            };
+            contents = lib.mkOption {
+              type = types.str;
+              default = "";
+            };
+          };
+        }
+      );
       default = [ ];
       description = "Custom zone files to configure CoreDNS. Entries should be { filename, domain, contents }.";
     };
+
+    serviceType = lib.mkOption {
+      type = types.str;
+      default = "ClusterIP";
+    };
     service = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          name = lib.mkOption {
+            type = types.str;
+            default = "";
+          };
+          annotations = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+          };
+          selector = lib.mkOption {
+            type = types.attrsOf types.anything;
+            default = { };
+          };
+          serviceType = lib.mkOption {
+            type = types.str;
+            default = "ClusterIP";
+          };
+          clusterIP = lib.mkOption {
+            type = types.nullOr types.str;
+            default = null;
+          };
+          clusterIPs = lib.mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+          };
+          loadBalancerIP = lib.mkOption {
+            type = types.nullOr types.str;
+            default = null;
+          };
+          loadBalancerClass = lib.mkOption {
+            type = types.nullOr types.str;
+            default = null;
+          };
+          externalIPs = lib.mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+          };
+          externalTrafficPolicy = lib.mkOption {
+            type = types.nullOr types.str;
+            default = null;
+          };
+          ipFamilyPolicy = lib.mkOption {
+            type = types.nullOr types.str;
+            default = null;
+          };
+          trafficDistribution = lib.mkOption {
+            type = types.str;
+            default = "PreferClose";
+          };
+        };
+      };
       default = {
         name = "";
         annotations = { };
@@ -296,7 +762,22 @@ let
     };
 
     serviceAccount = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          create = lib.mkOption {
+            type = types.bool;
+            default = false;
+          };
+          name = lib.mkOption {
+            type = types.str;
+            default = "";
+          };
+          annotations = lib.mkOption {
+            type = types.attrsOf types.str;
+            default = { };
+          };
+        };
+      };
       default = {
         create = false;
         name = "";
@@ -306,7 +787,14 @@ let
     };
 
     rbac = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          create = lib.mkOption {
+            type = types.bool;
+            default = true;
+          };
+        };
+      };
       default = {
         create = true;
       };
@@ -314,7 +802,14 @@ let
     };
 
     clusterRole = lib.mkOption {
-      type = types.attrs;
+      type = types.submodule {
+        options = {
+          nameOverride = lib.mkOption {
+            type = types.str;
+            default = "";
+          };
+        };
+      };
       default = {
         nameOverride = "";
       };
@@ -328,15 +823,119 @@ let
     };
 
     customLabels = lib.mkOption {
-      type = types.attrs;
+      type = types.attrsOf types.anything;
       default = { };
       description = "Custom labels added to Deployment/Pod/ConfigMap/Service/ServiceMonitor (and autoscaler) resources.";
     };
 
     customAnnotations = lib.mkOption {
-      type = types.attrs;
+      type = types.attrsOf types.anything;
       default = { };
       description = "Custom annotations added to Deployment/Pod/ConfigMap/Service/ServiceMonitor (and autoscaler) resources.";
+    };
+
+    affinity = lib.mkOption {
+      type = types.attrsOf types.anything;
+      default = { };
+      description = "Affinity settings for pod assignment";
+    };
+
+    topologySpreadConstraints = lib.mkOption {
+      type = types.listOf (types.attrsOf types.anything);
+      default = [ ];
+    };
+    tolerations = lib.mkOption {
+      type = types.listOf (types.attrsOf types.anything);
+      default = [ ];
+    };
+    initContainers = lib.mkOption {
+      type = types.listOf (types.attrsOf types.anything);
+      default = [ ];
+    };
+    nodeSelector = lib.mkOption {
+      type = types.attrsOf types.anything;
+      default = { };
+    };
+
+    env = lib.mkOption {
+      type = types.listOf (types.attrsOf types.anything);
+      default = [ ];
+    };
+    extraSecrets = lib.mkOption {
+      type = types.listOf (types.attrsOf types.anything);
+      default = [ ];
+    };
+
+    prometheus = lib.mkOption {
+      type = types.submodule {
+        options = {
+          service = lib.mkOption {
+            type = types.submodule {
+              options = {
+                enabled = lib.mkOption {
+                  type = types.bool;
+                  default = false;
+                };
+                annotations = lib.mkOption {
+                  type = types.attrsOf types.str;
+                  default = {
+                    "prometheus.io/scrape" = "true";
+                    "prometheus.io/port" = "9153";
+                  };
+                };
+                selector = lib.mkOption {
+                  type = types.attrsOf types.anything;
+                  default = { };
+                };
+              };
+            };
+            default = {
+              enabled = false;
+              annotations = {
+                "prometheus.io/scrape" = "true";
+                "prometheus.io/port" = "9153";
+              };
+            };
+          };
+
+          monitor = lib.mkOption {
+            type = types.submodule {
+              options = {
+                enabled = lib.mkOption {
+                  type = types.bool;
+                  default = false;
+                };
+                namespace = lib.mkOption {
+                  type = types.str;
+                  default = "";
+                };
+                additionalLabels = lib.mkOption {
+                  type = types.attrsOf types.str;
+                  default = { };
+                };
+                interval = lib.mkOption {
+                  type = types.str;
+                  default = "30s";
+                };
+                selector = lib.mkOption {
+                  type = types.attrsOf types.str;
+                  default = { };
+                };
+              };
+            };
+            default = {
+              enabled = false;
+            };
+          };
+        };
+      };
+      default = {
+        enabled = false;
+        serviceMonitor.enabled = false;
+        serviceMonitor.namespace = "monitoring";
+        serviceMonitor.additionalLabels = { };
+      };
+      description = "Prometheus monitoring configuration for CoreDNS.";
     };
   };
 
@@ -1417,31 +2016,55 @@ in
   inherit options;
 
   # Export manifests only if the service is enabled
-  manifests =
-    lib.optionalAttrs (coredns.autoscaler.enabled && !coredns.hpa.enabled) {
-      "deployment-autoscaler.json" = deploymentAutoscalerDrv;
-    }
-    // lib.optionalAttrs (!coredns.autoscaler.enabled && coredns.hpa.enabled) {
-      "hpa.json" = hpaDrv;
-    }
-    // lib.optionalAttrs (coredns.deployment.enabled) {
-      "deployment.json" = deploymentDrv;
-      "service.json" = serviceDrv;
-    }
-    // lib.optionalAttrs (coredns.deployment.enabled && coredns.rbac.create) {
-      "clusterrole.json" = clusterRoleBindingDrv;
-    }
-    // lib.optionalAttrs (coredns.deployment.enabled && !coredns.deployment.skipConfig) {
-      "configmap.json" = configMapDrv;
-    }
-    // lib.optionalAttrs (coredns.deployment.enabled && (coredns.podDisruptionBudget != null)) {
-      "poddisruptionbudget.json" = podDisruptionBudgetDrv;
-    }
-    // lib.optionalAttrs (coredns.deployment.enabled && coredns.prometheus.service.enabled) {
-      "servicemetrics.json" = serviceMetricsDrv;
-    }
+  config = {
+    manifests =
+      lib.optionalAttrs
+        (config.services.coredns.autoscaler.enabled && !config.services.coredns.hpa.enabled)
+        {
+          "deployment-autoscaler.json" = deploymentAutoscalerDrv;
+        }
+      //
+        lib.optionalAttrs
+          (!config.services.coredns.autoscaler.enabled && config.services.coredns.hpa.enabled)
+          {
+            "hpa.json" = hpaDrv;
+          }
+      // lib.optionalAttrs (config.services.coredns.deployment.enabled) {
+        "deployment.json" = deploymentDrv;
+        "service.json" = serviceDrv;
+      }
+      //
+        lib.optionalAttrs
+          (config.services.coredns.deployment.enabled && config.services.coredns.rbac.create)
+          {
+            "clusterrole.json" = clusterRoleBindingDrv;
+          }
+      //
+        lib.optionalAttrs
+          (config.services.coredns.deployment.enabled && !config.services.coredns.deployment.skipConfig)
+          {
+            "configmap.json" = configMapDrv;
+          }
+      //
+        lib.optionalAttrs
+          (
+            config.services.coredns.deployment.enabled && (config.services.coredns.podDisruptionBudget != null)
+          )
+          {
+            "poddisruptionbudget.json" = podDisruptionBudgetDrv;
+          }
+      //
+        lib.optionalAttrs
+          (config.services.coredns.deployment.enabled && config.services.coredns.prometheus.service.enabled)
+          {
+            "servicemetrics.json" = serviceMetricsDrv;
+          }
 
-    // lib.optionalAttrs (coredns.deployment.enabled && coredns.prometheus.monitor.enabled) {
-      "servicemonitor.json" = serviceMonitorDrv;
-    };
+      //
+        lib.optionalAttrs
+          (config.services.coredns.deployment.enabled && config.services.coredns.prometheus.monitor.enabled)
+          {
+            "servicemonitor.json" = serviceMonitorDrv;
+          };
+  };
 }

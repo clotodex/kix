@@ -15,6 +15,7 @@
   pkgs,
   config,
   lib,
+  ...
 }:
 
 let
@@ -65,8 +66,8 @@ let
 
       # Raw attribute set extensions and overrides
       configMapExtras = lib.mkOption {
-        type = lib.types.attrs;
-        default = {};
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
         description = "Additional attributes to merge into ConfigMap manifest";
         example = {
           metadata.annotations."config.alpha.kubernetes.io/managed-by" = "kix";
@@ -76,20 +77,27 @@ let
 
       deploymentExtras = lib.mkOption {
         type = lib.types.attrs;
-        default = {};
+        default = { };
         description = "Additional attributes to merge into Deployment manifest";
         example = {
           spec.template.spec.nodeSelector.disktype = "ssd";
-          spec.template.spec.containers = [{
-            name = "nginx";
-            env = [{ name = "DEBUG"; value = "true"; }];
-          }];
+          spec.template.spec.containers = [
+            {
+              name = "nginx";
+              env = [
+                {
+                  name = "DEBUG";
+                  value = "true";
+                }
+              ];
+            }
+          ];
         };
       };
 
       serviceExtras = lib.mkOption {
         type = lib.types.attrs;
-        default = {};
+        default = { };
         description = "Additional attributes to merge into Service manifest";
         example = {
           spec.type = "LoadBalancer";
@@ -100,7 +108,7 @@ let
       # Complete manifest overrides
       manifests = lib.mkOption {
         type = lib.types.attrs;
-        default = {};
+        default = { };
         description = "Raw Kubernetes manifests to use instead of generated ones. Keys should be manifest names.";
         example = {
           "configmap-nginx.json" = {
@@ -115,18 +123,18 @@ let
   };
 
   # Get config with defaults
-  cfg = config.services.nginx or {};
-  
+  cfg = config.services.nginx or { };
+
   # Simple defaults
   defaults = {
     enable = false;
     image = "nginx:alpine";
     replicas = 1;
     config = defaultConfig;
-    configMapExtras = {};
-    deploymentExtras = {};
-    serviceExtras = {};
-    manifests = {};
+    configMapExtras = { };
+    deploymentExtras = { };
+    serviceExtras = { };
+    manifests = { };
   };
 
   # Merge user config with defaults
@@ -158,20 +166,26 @@ let
       template = {
         metadata.labels.app = "nginx";
         spec = {
-          containers = [{
-            name = "nginx";
-            image = finalCfg.image;
-            ports = [{ containerPort = 80; }];
-            volumeMounts = [{
+          containers = [
+            {
+              name = "nginx";
+              image = finalCfg.image;
+              ports = [ { containerPort = 80; } ];
+              volumeMounts = [
+                {
+                  name = "nginx-conf";
+                  mountPath = "/etc/nginx/nginx.conf";
+                  subPath = "nginx.conf";
+                }
+              ];
+            }
+          ];
+          volumes = [
+            {
               name = "nginx-conf";
-              mountPath = "/etc/nginx/nginx.conf";
-              subPath = "nginx.conf";
-            }];
-          }];
-          volumes = [{
-            name = "nginx-conf";
-            configMap.name = "nginx-config";
-          }];
+              configMap.name = "nginx-config";
+            }
+          ];
         };
       };
     };
@@ -186,7 +200,12 @@ let
     };
     spec = {
       selector.app = "nginx";
-      ports = [{ port = 80; targetPort = 80; }];
+      ports = [
+        {
+          port = 80;
+          targetPort = 80;
+        }
+      ];
     };
   };
 
@@ -196,38 +215,37 @@ let
   serviceManifest = lib.recursiveUpdate baseService finalCfg.serviceExtras;
 
   # Support for complete manifest overrides with dependency tracking
-  finalManifests = 
-    if finalCfg.manifests != {} then
+  finalManifests =
+    if finalCfg.manifests != { } then
       # Use user-provided manifests, but convert to JSON files
-      lib.mapAttrs (name: manifest: 
-        pkgs.writeText name (builtins.toJSON manifest)
-      ) finalCfg.manifests
+      lib.mapAttrs (name: manifest: pkgs.writeText name (builtins.toJSON manifest)) finalCfg.manifests
     else
       # Use generated manifests with dependency tracking via store path references
       let
         # ConfigMap is the base dependency
         configMapDerivation = pkgs.writeText "configmap-nginx.json" (builtins.toJSON configMapManifest);
-        
+
         # Deployment with ConfigMap dependency reference
         deploymentWithDeps = deploymentManifest // {
           metadata = deploymentManifest.metadata // {
-            annotations = (deploymentManifest.metadata.annotations or {}) // {
+            annotations = (deploymentManifest.metadata.annotations or { }) // {
               "nix.kix.dev/configmap-dependency" = "${configMapDerivation}";
             };
           };
         };
         deploymentDerivation = pkgs.writeText "deployment-nginx.json" (builtins.toJSON deploymentWithDeps);
-        
-        # Service with both ConfigMap and Deployment dependency references  
+
+        # Service with both ConfigMap and Deployment dependency references
         serviceWithDeps = serviceManifest // {
           metadata = serviceManifest.metadata // {
-            annotations = (serviceManifest.metadata.annotations or {}) // {
+            annotations = (serviceManifest.metadata.annotations or { }) // {
               "nix.kix.dev/deployment-dependency" = "${deploymentDerivation}";
             };
           };
         };
         serviceDerivation = pkgs.writeText "service-nginx.json" (builtins.toJSON serviceWithDeps);
-      in {
+      in
+      {
         #"configmap-nginx.json" = configMapDerivation;
         #"deployment-nginx.json" = deploymentDerivation;
         "service-nginx.json" = serviceDerivation;
@@ -239,5 +257,5 @@ in
   inherit options;
 
   # Export manifests only if the service is enabled
-  manifests = lib.optionalAttrs finalCfg.enable finalManifests;
+  config.manifests = lib.optionalAttrs finalCfg.enable finalManifests;
 }
