@@ -3,62 +3,7 @@
   services = {
     nginx.enable = false;
 
-    coredns =
-      /* lib.recursiveUpdate
-        {
-          # INFO: defaults since I am lazy with good typing
-          autoscaler.enabled = false;
-          hpa.enabled = false;
-          podDisruptionBudget = { };
-          prometheus.monitor.enabled = false;
-          customAnnotations = { };
-          customLabels = { };
-          image = {
-            repository = "registry.k8s.io/cpa/cluster-proportional-autoscaler";
-            tag = "v1.9.0";
-            pullPolicy = "IfNotPresent";
-            pullSecrets = [ ];
-          };
-          zoneFiles = [ ];
-          rollingUpdate = {
-            maxUnavailable = 1;
-            maxSurge = "25%";
-          };
-        podAnnotations = { };
-        podSecurityContext = {};
-        priorityClassName = "";
-        affinity = { };
-        topologySpreadConstraints = { };
-        tolerations = { };
-        nodeSelector = { };
-        initContainers = [];
-        livenessProbe.enabled = false;
-        readinessProbe.enabled = false;
-        securityContext = {};
-        env = {};
-        extraSecrets = {};
-        terminationGracePeriodSeconds = {};
-          deployment = {
-            skipConfig = false;
-            enabled = true;
-            #name = "";
-            annotations = { };
-            selector = { };
-            #initContainers = [ ];
-            #affinity = { };
-            #topologySpreadConstraints = [ ];
-            #nodeSelector = { };
-            #tolerations = [ ];
-            #podDisruptionBudget = { };
-            #extraContainers = [ ];
-            #extraVolumes = [ ];
-            #extraVolumeMounts = [ ];
-            #extraSecrets = [ ];
-            #env = [ ];
-          };
-          rbac.create = true;
-        } */
-        {
+    coredns = {
           enable = true;
           isClusterService = true;
           replicaCount = 3;

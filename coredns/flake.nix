@@ -40,6 +40,7 @@
 
               };
 
+              # We need something that points to all top level components
               manifestsDerivation = pkgs.runCommand "k8s-manifests" { } ''
                 mkdir -p $out
                 ${lib.concatStringsSep "\n" (
