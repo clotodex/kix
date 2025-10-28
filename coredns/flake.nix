@@ -27,10 +27,10 @@
                 modules = [
                   ./modules
                   ./modules/nginx.nix
-                  ./modules/coredns.nix
-                ]
-                ++ [
-                  ./real-config.nix
+                  ./modules/corednsNew
+                  #]
+                  #++ [
+                  #  ./real-config.nix
                 ];
 
                 specialArgs = {
