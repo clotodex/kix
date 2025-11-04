@@ -36,6 +36,7 @@
                 specialArgs = {
                   inherit pkgs;
                   inherit lib;
+                  kixlib = import ./lib { inherit pkgs; inherit (pkgs) lib; };
                 };
 
               };
@@ -53,6 +54,44 @@
             in
             {
               default = manifestsDerivation;
+
+              paths =
+                let
+                  dependenciesFile = ./dependencies.txt;
+                  # Read the initial dependencies
+                  dependenciesContent = builtins.readFile dependenciesFile;
+                  initialDeps = lib.filter (p: p != "") (lib.splitString "\n" dependenciesContent);
+
+                in
+                pkgs.stdenv.mkDerivation {
+                  name = "print-all-dependencies";
+
+                  # This is the magic: exportReferencesGraph creates a file with all transitive dependencies
+                  #exportReferencesGraph = lib.listToAttrs (
+                  #  lib.imap0 (i: dep: {
+                  #    name = "graph-${toString i}";
+                  #    value = dep;
+                  #  }) evaluation.config.manifests
+                  #);
+                  exportReferencesGraph =   lib.concatLists (lib.mapAttrsToList (name: path: [ "graph-${name}" path ]) evaluation.config.manifests);
+
+                  buildCommand = ''
+                    mkdir -p $out
+
+                    # The graph files contain JSON-like data, extract store paths
+                    cat graph-* | grep -oE '"/nix/store/[^"]*"' | tr -d '"' | sort -u > all-paths.txt
+
+                    # Now cat all the paths
+                    while IFS= read -r path; do
+                      if [[ -f "$path" ]]; then
+                        echo "=== $path ===" | tee -a $out/all-contents.txt
+                        cat "$path" | tee -a $out/all-contents.txt
+                        echo "---" | tee -a $out/all-contents.txt
+                      fi
+                    done < all-paths.txt
+                  '';
+
+                };
             }
           );
         };
