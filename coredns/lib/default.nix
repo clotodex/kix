@@ -3,8 +3,84 @@
   lib,
   ...
 }:
-rec {
-  removeNulls = lib.filterAttrs (_: v: v != null);
+
+lib.makeExtensible (self: {
+  _defaultMetadata = { };
+
+  # Simple builder API
+  withMetadata =
+    metadata:
+    self.extend (
+      self: super: {
+        _defaultMetadata = lib.recursiveUpdate super._defaultMetadata metadata;
+      }
+    );
+
+  # Internal state
+  _preprocessors = [ ];
+
+  # Simple builder API
+  withPreprocessor =
+    preprocessor:
+    self.extend (
+      self: super: {
+        _preprocessors = super._preprocessors ++ [ preprocessor ];
+      }
+    );
+
+  # Batch for convenience
+  withPreprocessors = preprocessors: lib.foldl' (l: p: l.withPreprocessor p) self preprocessors;
+
+  # Named registration for debuggability
+  addPreprocessor = name: fn: self.withPreprocessor (lib.setFunctionArgs fn { __name = name; });
+
+  # Inspection (useful for debugging)
+  listPreprocessors = map (fn: fn.__name or "<anonymous>") self._preprocessors;
+
+  removeNulls2 =
+    attrs:
+    lib.filterAttrs (_: v: v != null) (
+      builtins.mapAttrs (
+        _: v: if builtins.isAttrs v && !(lib.isDerivation v) && !(v ? type) then self.removeNulls v else v
+      ) attrs
+    );
+
+  removeNulls5 =
+    attrs:
+    builtins.mapAttrs (
+      _: v: if builtins.isAttrs v && !(lib.isDerivation v) && !(v ? type) then self.removeNulls v else v
+    ) (lib.filterAttrs (_: v: v != null) attrs);
+
+  removeNulls =
+    attrs:
+    builtins.mapAttrs (
+      _: v:
+      let
+        cleanValue =
+          if builtins.isAttrs v && !(lib.isDerivation v) && !(v ? type) then self.removeNulls v
+          else if builtins.isList v then builtins.map (x: if builtins.isAttrs x && !(lib.isDerivation x) then self.removeNulls x else x) v
+          else v;
+      in
+      cleanValue
+    ) (lib.filterAttrs (_: v: v != null) attrs);
+
+  removeNulls3 =
+    attrs:
+    builtins.listToAttrs (
+      builtins.filter (nameValue: nameValue.value != null) (
+        map (name: {
+          inherit name;
+          value =
+            let
+              val = attrs.${name};
+            in
+            if builtins.isAttrs val && !lib.isDerivation val then self.removeNulls val else val;
+        }) (builtins.attrNames attrs)
+      )
+    );
+
+  removeNulls4 = lib.filterAttrsRecursive (name: value: value != null);
+
   # TODO: mkResource = x: extra: removeNulls (lib.recursiveUpdate x extra);
 
   # TODO: this could be the main "magic" and one could involve any postprocessors, filtering by kind, etc, in this step
@@ -12,7 +88,8 @@ rec {
   # how do i install crds?
 
   # TODO: needs to be overridable, extendable and injectable from the outside
-  preProcessResource = resource: resource; # no-op for now
+  # list of resource -> resource mappers
+  preProcessors = [ ];
 
   # TODO: could actually turn this into a set:
   # {
@@ -26,8 +103,25 @@ rec {
   mkManifest =
     resource:
     pkgs.writeText "${resource.kind}.json" (
-      resource |> removeNulls |> preProcessResource |> removeNulls |> builtins.toJSON
+      resource
+      |> self.removeNulls
+      |> (x: lib.foldl' (res: f: f res) x self._preprocessors)
+      |> self.removeNulls
+      |> builtins.toJSON
     );
+
+  mkResource =
+    {
+      kind,
+      apiVersion ? "v1",
+      metadata ? { },
+      ...
+    }@args:
+    args
+    // {
+      inherit apiVersion kind;
+      metadata = lib.recursiveUpdate self._defaultMetadata metadata;
+    };
 
   addDependency =
     drv: resource:
@@ -63,41 +157,40 @@ rec {
     mkClusterRole =
       {
         rules,
-        metadata ? { },
-      }:
-      {
+        ...
+      }@r:
+      self.mkResource ( lib.recursiveUpdate r {
         apiVersion = "rbac.authorization.k8s.io/v1";
         kind = "ClusterRole";
-        metadata = metadata;
         rules = rules;
-      };
+        metadata = { namespace = null; };
+      });
 
     bind =
       clusterRole: serviceAccount:
-      mkManifest {
+      self.mkManifest (self.mkResource {
         apiVersion = "rbac.authorization.k8s.io/v1";
         kind = "ClusterRoleBinding";
         roleRef = {
           apiGroup = lib.elemAt (lib.strings.split "/" clusterRole.apiVersion) 0;
           kind = clusterRole.kind;
-          name = mkManifest clusterRole;
+          name = self.mkManifest clusterRole;
         };
         subjects = [
           {
             kind = serviceAccount.kind;
-            name = mkManifest serviceAccount;
+            name = self.mkManifest serviceAccount;
           }
         ];
-      };
+      });
 
     mkServiceAccount =
       {
-        metadata ? null,
+        metadata ? {},
         imagePullSecrets ? null,
         ...
       }:
-      {
-        apiVersion = "v1";
+      self.mkResource {
         kind = "ServiceAccount";
         metadata = metadata;
         imagePullSecrets = imagePullSecrets;
@@ -106,6 +199,7 @@ rec {
   pod = {
 
     # TODO: will this be smarter?
+    # TODO: mkResource?
     mkPodTemplate =
       args@{
         metadata ? { },
@@ -180,8 +274,7 @@ rec {
         spec,
         ...
       }:
-      {
-        apiVersion = "v1";
+      self.mkResource {
         kind = "Service";
         metadata = metadata;
         spec = spec;
@@ -195,18 +288,19 @@ rec {
       {
         replicas ? 1,
         strategy ? null,
-        selector ? null,
+      #selector ? null,
         template,
         ...
       }:
-      {
+      self.mkResource {
         apiVersion = "apps/v1";
         kind = "Deployment";
         spec = {
           inherit replicas strategy template;
 
           # TODO: this might be too extensive
-          selector = selector ? template.metadata.labels;
+           #selector = selector ? template.metadata.labels;
+          selector =  template.metadata.labels;
         };
       };
 
@@ -216,7 +310,7 @@ rec {
         spec = (deployment.spec or { }) // {
           template = (deployment.spec.template or { }) // {
             spec = (deployment.spec.template.spec or { }) // {
-              serviceAccountName = mkManifest serviceAccount;
+              serviceAccountName = self.mkManifest serviceAccount;
             };
           };
         };
@@ -225,8 +319,10 @@ rec {
     # INFO: could also be called intoSameSelectorService
     intoService =
       serviceArgs: deployment:
-      networking.mkService (lib.recursiveUpdate serviceArgs { spec.selector = deployment.spec.selector; })
-      |> addDependency (mkManifest deployment);
+      self.networking.mkService (
+        lib.recursiveUpdate serviceArgs { spec.selector = deployment.spec.selector; }
+      )
+      |> self.addDependency (self.mkManifest deployment);
   };
 
   configMap = {
@@ -236,8 +332,7 @@ rec {
         immutable ? null,
         ...
       }:
-      {
-        apiVersion = "v1";
+      self.mkResource {
         kind = "ConfigMap";
         data = data;
         immutable = immutable;
@@ -268,9 +363,9 @@ rec {
       {
         name = name ? "v${hashForName}"; # TODO: check if this is allowed or if we should derive the vol name differently
         configMap = {
-          name = mkManifest configMap;
+          name = self.mkManifest configMap;
           items = items;
         };
       };
   };
-}
+})

@@ -30,7 +30,7 @@
                   ./modules/corednsNew
                   #]
                   #++ [
-                  #  ./real-config.nix
+                  ./real-config.nix
                 ];
 
                 specialArgs = {
