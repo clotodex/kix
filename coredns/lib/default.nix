@@ -53,16 +53,30 @@ lib.makeExtensible (self: {
 
   removeNulls =
     attrs:
-    builtins.mapAttrs (
-      _: v:
-      let
-        cleanValue =
-          if builtins.isAttrs v && !(lib.isDerivation v) && !(v ? type) then self.removeNulls v
-          else if builtins.isList v then builtins.map (x: if builtins.isAttrs x && !(lib.isDerivation x) then self.removeNulls x else x) v
-          else v;
-      in
-      cleanValue
-    ) (lib.filterAttrs (_: v: v != null) attrs);
+    builtins.mapAttrs
+      (
+        _: v:
+        let
+          cleanValue =
+            if builtins.isAttrs v && !(lib.isDerivation v) && !(v ? type) then
+              self.removeNulls v
+            else if builtins.isList v then
+              builtins.map (x: if builtins.isAttrs x && !(lib.isDerivation x) then self.removeNulls x else x) v
+            else
+              v;
+        in
+        cleanValue
+      ) # (lib.filterAttrs (_: v: v != null) attrs);
+      (
+        lib.filterAttrs (
+          _: v:
+          v != null
+          && !(
+            (builtins.isAttrs v && !(lib.isDerivation v) && !(v ? type) && v == { })
+            || (builtins.isList v && v == [ ])
+          )
+        ) attrs
+      );
 
   removeNulls3 =
     attrs:
@@ -159,34 +173,44 @@ lib.makeExtensible (self: {
         rules,
         ...
       }@r:
-      self.mkResource ( lib.recursiveUpdate r {
-        apiVersion = "rbac.authorization.k8s.io/v1";
-        kind = "ClusterRole";
-        rules = rules;
-        metadata = { namespace = null; };
-      });
+      self.mkResource (
+        lib.recursiveUpdate r {
+          apiVersion = "rbac.authorization.k8s.io/v1";
+          kind = "ClusterRole";
+          rules = rules;
+          metadata = {
+            namespace = null;
+          };
+        }
+      );
 
     bind =
       clusterRole: serviceAccount:
-      self.mkManifest (self.mkResource {
-        apiVersion = "rbac.authorization.k8s.io/v1";
-        kind = "ClusterRoleBinding";
-        roleRef = {
-          apiGroup = lib.elemAt (lib.strings.split "/" clusterRole.apiVersion) 0;
-          kind = clusterRole.kind;
-          name = self.mkManifest clusterRole;
-        };
-        subjects = [
-          {
-            kind = serviceAccount.kind;
-            name = self.mkManifest serviceAccount;
-          }
-        ];
-      });
+      self.mkManifest (
+        self.mkResource {
+          apiVersion = "rbac.authorization.k8s.io/v1";
+          kind = "ClusterRoleBinding";
+          metadata = {
+            namespace = null;
+          };
+          roleRef = {
+            apiGroup = lib.elemAt (lib.strings.split "/" clusterRole.apiVersion) 0;
+            kind = clusterRole.kind;
+            name = self.mkManifest clusterRole;
+          };
+          subjects = [
+            {
+              kind = serviceAccount.kind;
+              name = self.mkManifest serviceAccount;
+              namespace = serviceAccount.metadata.namespace or "default";
+            }
+          ];
+        }
+      );
 
     mkServiceAccount =
       {
-        metadata ? {},
+        metadata ? { },
         imagePullSecrets ? null,
         ...
       }:
@@ -288,19 +312,21 @@ lib.makeExtensible (self: {
       {
         replicas ? 1,
         strategy ? null,
-      #selector ? null,
+        metadata ? { },
         template,
         ...
       }:
       self.mkResource {
+        inherit metadata;
         apiVersion = "apps/v1";
         kind = "Deployment";
         spec = {
           inherit replicas strategy template;
 
           # TODO: this might be too extensive
-           #selector = selector ? template.metadata.labels;
-          selector =  template.metadata.labels;
+          #selector = selector ? template.metadata.labels;
+          selector.matchLabels = template.metadata.labels;
+
         };
       };
 
@@ -320,7 +346,7 @@ lib.makeExtensible (self: {
     intoService =
       serviceArgs: deployment:
       self.networking.mkService (
-        lib.recursiveUpdate serviceArgs { spec.selector = deployment.spec.selector; }
+        lib.recursiveUpdate serviceArgs { spec.selector = deployment.spec.template.metadata.labels; }
       )
       |> self.addDependency (self.mkManifest deployment);
   };
@@ -353,7 +379,7 @@ lib.makeExtensible (self: {
 
     asVolume =
       {
-        name ? null,
+        # TODO: name
         items ? null,
       }:
       configMap:
@@ -361,7 +387,7 @@ lib.makeExtensible (self: {
         hashForName = builtins.hashString "md5" (builtins.toJSON configMap);
       in
       {
-        name = name ? "v${hashForName}"; # TODO: check if this is allowed or if we should derive the vol name differently
+        name = "cfgmap-${hashForName}"; # TODO: check if this is allowed or if we should derive the vol name differently
         configMap = {
           name = self.mkManifest configMap;
           items = items;

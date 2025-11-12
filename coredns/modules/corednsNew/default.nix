@@ -299,6 +299,11 @@ let
 
   coredns = config.services.coredns;
 
+  ports = import ./ports.nix {
+    inherit lib;
+    servers = coredns.servers;
+  };
+
   applyToAll =
     resource:
     # TODO: filter for specific resources
@@ -431,48 +436,104 @@ let
         value = zonefile.contents;
       }) (coredns.zoneFiles or [ ])
     )
-    |> asVolume { };
+    |> asVolume {
+      # TODO: could this be auto-generated with hash? do we need to care?
+      items = [
+        {
+          key = "Corefile";
+          path = "Corefile";
+        }
+      ];
+    };
 
   cContainer =
     with kixlib'.pod;
     mkContainer {
       name = "coredns";
-      image = "coredns/coredns:latest";
+      image = "coredns/coredns:1.12.3";
+      args = [
+        "-conf"
+        "/etc/coredns/Corefile"
+      ];
       imagePullPolicy = "IfNotPresent";
+      resources = coredns.resources;
     }
     |> withVolumeMount {
       name = configMapVol.name;
       mountPath = "/etc/coredns";
     }
     # TODO: add extra secrets as volume mounts
-    |> withLivenessProbe (coredns.livenessProbe or { })
-    |> withReadinessProbe (coredns.livenessProbe or { })
+    |> withLivenessProbe (
+      coredns.livenessProbe or {
+        failureThreshold = 5;
+        httpGet = {
+          path = "/health";
+          port = 8080;
+          scheme = "HTTP";
+        };
+        initialDelaySeconds = 60;
+        periodSeconds = 10;
+        successThreshold = 1;
+        timeoutSeconds = 5;
+      }
+    )
+    |> withReadinessProbe (
+      coredns.livenessProbe or {
+        failureThreshold = 1;
+        httpGet = {
+          path = "/ready";
+          port = 8181;
+          scheme = "HTTP";
+        };
+        initialDelaySeconds = 30;
+        periodSeconds = 5;
+        successThreshold = 1;
+        timeoutSeconds = 5;
+      }
+    )
     |> lib.recursiveUpdate config.containerOverrides or { };
 
   cService =
     kixlib'.workload.mkDeployment {
       replicas = coredns.replicaCount or 1;
+      # TODO: is this different from k8s default? - overriding should be a global thing
       strategy = {
         type = "RollingUpdate";
-        rollingUpdate = coredns.rollingUpdate or { };
+        rollingUpdate = {
+          maxSurge = "25%";
+          maxUnavailable = 1;
+        };
+      };
+      metadata.labels = {
+        "app.kubernetes.io/version" = "1.12.3";
       };
       template =
         kixlib'.pod.mkPodTemplate {
-          metadata.labels = {
-            "k8s-app" = "coredns";
-            "app.kubernetes.io/name" = "coredns";
-            "app.kubernetes.io/instance" = "release-name";
+          metadata = {
+            annotations = {
+              "scheduler.alpha.kubernetes.io/tolerations" =
+                ''[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'';
+            };
+            labels = {
+              # TODO:
+              "k8s-app" = "coredns";
+              "app.kubernetes.io/name" = "coredns";
+              "app.kubernetes.io/instance" = "release-name";
+            };
           };
           spec = {
             containers = [ cContainer ];
             volumes = [ configMapVol ];
+            # if clusterservice, add toleration for critical addons
+            dnsPolicy = lib.optionalAttrs coredns.isClusterService "Default";
+
           };
         }
         |> lib.recursiveUpdate config.podOverrides or { };
     }
     |> kixlib'.addDependency roleBind # FIXME: instead of this roll that as (forced) argument into withSA
     |> kixlib'.workload.withServiceAccount deploySA
-    |> kixlib'.workload.intoService { };
+    |> kixlib'.workload.intoService { spec.type = "ClusterIP"; };
 
   #  - monitor it -> maybe should come from prometheus app, not packaged with this
   #      - Servicemonitor
@@ -490,7 +551,15 @@ in
 {
   inherit options;
 
-  config.manifests = lib.optionalAttrs coredns.enable {
-    "coredns" = kixlib'.mkManifest cService;
+  config = {
+
+    # TODO: assertions
+    # add an assertion for the servers
+    # Specifying a Server Block with a zone that is already assigned to a server and running it on the same port is an error. This Corefile will generate an error on startup
+    # Note that if you use the bind plugin you can have the same zone listening on the same port, provided they are binded to different interfaces or IP addresses.
+
+    manifests = lib.optionalAttrs coredns.enable {
+      "coredns" = kixlib'.mkManifest cService;
+    };
   };
 }
